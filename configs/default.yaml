@@ -1,0 +1,59 @@
+# Phase 0 defaults. Local paths are placeholders — this repo does not
+# download weights or corpora. Create the directories yourself after access.
+
+project:
+  title: Latent Predictive Objectives for Timing Control in Full-Duplex Dialogue Models
+  phase: 0
+  course: CCSF CS 199 Fall 2026
+  units: 2-3
+  student: Vel Moon Reichman
+  instructor: Indika Walimuni
+
+chunk:
+  # 80 ms matches GLM-4-Voice / BayLing-Duplex speech tokens (12.5 Hz)
+  # and is compatible with Moshi / Mimi frame rate.
+  duration_s: 0.08
+
+eval:
+  horizons_s: [0.16, 0.32, 0.50, 1.00, 2.00]
+  event_kinds: [turn_shift, backchannel, barge_in]
+
+models:
+  moshi:
+    paper: "https://arxiv.org/abs/2410.00037"
+    code: "https://github.com/kyutai-labs/moshi"
+    weights:
+      moshiko: kyutai/moshiko-pytorch-bf16
+      moshika: kyutai/moshika-pytorch-bf16
+    download_in_phase0: false
+  bayling_duplex:
+    paper: "https://arxiv.org/abs/2606.14528"
+    code: "https://github.com/BayLing-Models/BayLing-Duplex"
+    weights: BayLing-Models/BayLing-Duplex
+    tokenizer: zai-org/glm-4-voice-tokenizer
+    decoder: zai-org/glm-4-voice-decoder
+    # HF card "516k params" is a display bug. Four BF16 shards, ~19.1 GB,
+    # ~9.54B parameters. Do not download from this skeleton.
+    n_safetensor_shards: 4
+    approx_bytes: 19088029827
+    approx_bf16_params: 9542557728
+    download_in_phase0: false
+  vap:
+    paper: "https://arxiv.org/abs/2205.09812"
+    code: "https://github.com/ErikEkstedt/VAP"
+    download_in_phase0: false
+
+data:
+  candor:
+    paper: "https://arxiv.org/abs/2203.00674"
+    access: "https://betterup-data-requests.herokuapp.com/"
+    info: "https://www.betterup.com/research/candor-research"
+  duplexchat:
+    paper: "https://arxiv.org/abs/2607.04941"
+    manifest: sarulab-speech/DuplexChat
+    reconstruct: "https://github.com/sarulab-speech/DuplexChat"
+
+paths:
+  data_root: ./data
+  weights_root: ./weights
+  cache_root: ./cache
