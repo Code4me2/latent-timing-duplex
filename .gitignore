@@ -1,0 +1,60 @@
+# Local data, weights, and caches — never commit
+/data/
+/weights/
+/checkpoints/
+/outputs/
+/cache/
+.cache/
+hf_cache/
+.huggingface/
+.hf/
+
+# Model and audio artifacts
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.onnx
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.tar
+*.tar.gz
+*.webdataset
+*.wds
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.so
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Jupyter (notebooks are not the product)
+.ipynb_checkpoints/
+
+# Local tool scratch (not part of the package)
+/agent-tools/

@@ -1,0 +1,17 @@
+# Eval-harness defaults. Any per-chunk scalar can be scored here.
+
+chunk:
+  duration_s: 0.08
+
+eval:
+  horizons_s: [0.16, 0.32, 0.50, 1.00, 2.00]
+  event_kinds: [turn_shift, backchannel, barge_in]
+  min_positives: 5
+  min_negatives: 5
+
+synthetic:
+  duration_s: 120.0
+  seed: 0
+  n_turn_shifts: 24
+  n_backchannels: 18
+  n_barge_ins: 8
