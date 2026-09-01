@@ -17,7 +17,8 @@ def test_submodule_imports() -> None:
     from latent_timing_duplex.data.duplexchat import DuplexChatPipeline
     from latent_timing_duplex.data.synthetic import generate_synthetic_session
     from latent_timing_duplex.eval.harness import score_signal
-    from latent_timing_duplex.extract.nll import FrozenNLLExtractor
+    from latent_timing_duplex.extract.nll import FrozenNLLExtractor, delay_nan_mask
+    from latent_timing_duplex.spark_slice import SLICE_DURATION_S
     from latent_timing_duplex.models.bayling_duplex import BayLingDuplexWrapper
     from latent_timing_duplex.models.moshi import MoshiWrapper
 
@@ -29,6 +30,8 @@ def test_submodule_imports() -> None:
     assert CandorPipeline is not None
     assert DuplexChatPipeline is not None
     assert FrozenNLLExtractor is not None
+    assert callable(delay_nan_mask)
+    assert SLICE_DURATION_S == 1383.44
     assert models.__doc__
     assert data.__doc__
     assert baselines.__doc__

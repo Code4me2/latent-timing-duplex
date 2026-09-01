@@ -42,6 +42,10 @@ models:
     paper: "https://arxiv.org/abs/2205.09812"
     code: "https://github.com/ErikEkstedt/VAP"
     download_in_phase0: false
+    device: cpu
+
+# Finished Spark 10-clip numbers live in spark_slice.yaml. Do not re-run.
+spark_slice: spark_slice.yaml
 
 data:
   candor:

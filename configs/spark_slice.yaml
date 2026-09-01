@@ -1,0 +1,44 @@
+# Reference numbers from a finished Spark job. Do not re-run Spark.
+# 10-clip DuplexChat EN slice, LEFT=user, same tar.
+
+slice:
+  id: duplexchat-en-10clip
+  source: "DuplexChat EN 10-clip (same tar, LEFT=user)"
+  duration_s: 1383.44
+  do_not_rerun_spark: true
+
+moshi:
+  forward: LMModel.forward
+  nan_safe: true
+  env: [NO_CUDA_GRAPH=1, NO_TORCH_COMPILE=1]
+  unweighted:
+    audio_nll: 0.407020
+    text_nll: 0.023778
+  duration_weighted:
+    audio_nll: 0.488034
+    text_nll: 0.025773
+
+bayling_duplex:
+  comparable_to_moshi_codebook_nll: false
+  vocab_size: 168960
+  n_tokens: 17280
+  unweighted:
+    nll: 9.759206
+    ppl: 17313
+  duration_weighted:
+    nll: 7.167710
+    ppl: 1297
+
+vap:
+  device: cpu
+  duration_weighted:
+    p_now: 0.372166
+    p_future: 0.412835
+    p_shift: 0.627834
+
+hypothesis:
+  binding: false
+  text: >
+    Moshi NaNs were caused by the acoustic delay pattern. LMModel.forward
+    undelays delayed codebooks with fill_value=NaN; reducing NLL without
+    that mask yields NaN.

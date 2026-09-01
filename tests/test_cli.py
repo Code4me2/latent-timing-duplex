@@ -20,6 +20,16 @@ def test_check(capsys) -> None:
     assert "configs ok" in out
 
 
+def test_reference(capsys) -> None:
+    assert main(["reference"]) == 0
+    out = capsys.readouterr().out
+    assert "0.407020" in out
+    assert "9.759206" in out
+    assert "0.627834" in out
+    assert "Do not re-run Spark" in out
+    assert "168960" in out
+
+
 def test_harness(capsys) -> None:
     assert main(["harness", "--duration", "40", "--seed", "2"]) == 0
     out = capsys.readouterr().out
