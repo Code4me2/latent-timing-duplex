@@ -23,6 +23,7 @@ def test_default_config_ids() -> None:
     assert bay["decoder"] == BAYLING_DECODER_ID
     assert bay["n_safetensor_shards"] == 4
     assert bay["download_in_phase0"] is False
+    assert cfg["models"]["vap"]["device"] == "cpu"
 
 
 def test_eval_config_horizons() -> None:

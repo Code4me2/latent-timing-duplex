@@ -1,6 +1,6 @@
 """Latent predictive objectives for timing control in full-duplex dialogue.
 
-Phase 0 skeleton only: interfaces, stubs, and a working synthetic eval harness.
+Phase 0: synthetic eval harness, Moshi delay-NaN NLL, frozen VAP (CPU).
 No model weights, corpora, or Phase 1/2 heads ship in this package.
 """
 

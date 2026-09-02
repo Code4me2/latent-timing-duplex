@@ -21,8 +21,8 @@ def test_moshi_requires_local_dir() -> None:
         wrapper.load()
 
 
-def test_moshi_local_dir_still_stubbed() -> None:
-    with pytest.raises(Phase0NotImplemented, match="Phase 0 fill-in"):
+def test_moshi_missing_local_dir() -> None:
+    with pytest.raises(FileNotFoundError, match="not a directory"):
         MoshiWrapper().load(local_dir="/tmp/not-a-real-moshi-dir")
 
 
@@ -59,10 +59,10 @@ def test_duplexchat_notes_and_blocker() -> None:
         pipe.list_sessions()
 
 
-def test_nll_extractor_is_stubbed() -> None:
+def test_nll_extractor_needs_loaded_model() -> None:
     session = DualChannelSession(session_id="x", duration_s=1.0)
     extractor = FrozenNLLExtractor(MoshiWrapper())
-    with pytest.raises(Phase0NotImplemented, match="NLL"):
+    with pytest.raises(WeightsNotBundled, match="not loaded"):
         extractor.extract(session)
     wrapped = extractor.wrap_values(session, [1.0, 2.0, 3.0])
     assert [c.value for c in wrapped] == [1.0, 2.0, 3.0]
