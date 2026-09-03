@@ -27,9 +27,10 @@ Primary cross-corpus contrast: **DuplexChat expanded** vs **part001 excluding pi
 
 ## Confounds checked
 1. Channel packing LEFT=user: spot-check PASS (no remap)
-2. Sample rate 48→24 kHz on CANDOR20: Moshi Δ≈0; gap to DuplexChat holds
-3. Duration NN matching: supports disjoint; Moshi gap holds on 18 shortest CANDOR; VAP overlaps
-4. Fixed-length first-W window Moshi NLL: pending / attach when done
+2. Sample rate 48→24 kHz on CANDOR20: Moshi Δ≈0; full-length gap to DuplexChat holds
+3. Duration NN matching: supports disjoint; full-length Moshi gap holds on 18 shortest CANDOR; VAP overlaps
+4. Fixed-length first-W window Moshi NLL: **done** (gap vanishes; CIs overlap; point estimate reverses)
+5. Mid-window equal-length Moshi NLL: pending / attach when done
 
 ## Do not do under this protocol
 - Download CANDOR parts 002–034 unless a new protocol version says so
@@ -38,4 +39,4 @@ Primary cross-corpus contrast: **DuplexChat expanded** vs **part001 excluding pi
 - Claim timing-objective success from VAP p(shift) alone when CIs overlap
 
 ## Phase 0 freeze criterion
-Phase 0 is frozen when: (a) findings doc on main reflects the above slices, (b) channel + sample-rate + duration checks documented, (c) fixed-window equal-length Moshi check reported, (d) this protocol filed in `docs/`. Then Phase 1 may begin under a separate training protocol.
+After the mid-window check, Phase 0 can freeze with engineering success + no robust Moshi cross-corpus effect under equal length; VAP overlaps throughout expanded comparisons. Required: (a) findings doc on main reflects the above slices, (b) channel + sample-rate + duration + first-W checks documented, (c) mid-window equal-length Moshi check reported, (d) this protocol filed in `docs/`. Then Phase 1 may begin under a separate training protocol.
