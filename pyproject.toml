@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "latent-timing-duplex"
 version = "0.1.0"
-description = "Phase 0 skeleton for latent predictive objectives for timing control in full-duplex dialogue models (CCSF CS 199)."
+description = "Phase 0 freeze + Phase 1 scaffolding for latent predictive objectives for timing control in full-duplex dialogue models (CCSF CS 199)."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

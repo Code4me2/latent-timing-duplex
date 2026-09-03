@@ -2,7 +2,9 @@
 
 **Gate:** Can any per-chunk implicit signal (starting with frozen user-channel NLL) predict turn shifts, backchannels, and barge-ins at multiple horizons? A weak or null result is still reportable.
 
-This file is the working checklist for the skeleton in this repo. Nothing below downloads data or weights.
+**Freeze:** Phase 0 findings and the equal-length window protocol are filed in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) and [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md). Do not invent numbers. Phase 1 scaffolding (heads only, backbones frozen) is in [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). Phase 2 is out of scope.
+
+This file is the working checklist for the Phase 0 skeleton in this repo. Nothing below downloads data or weights.
 
 ## Five work items
 
@@ -59,9 +61,8 @@ Hypothesis (non-binding): Moshi NaNs came from the acoustic delay pattern (`_und
 
 ## What this phase is not
 
-- No Phase 1 JEPA encoder/predictor.
+- Phase 1 JEPA heads live in `latent_timing_duplex.phase1` / [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md); they do not change Phase 0 NLL / VAP jobs.
 - No Phase 2 policy conditioning.
-- No training scripts.
 - No unpublished weight URLs.
 
 ## Hardware (planned, not attached)

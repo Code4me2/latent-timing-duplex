@@ -36,3 +36,12 @@ def test_harness(capsys) -> None:
     assert "synthetic_salience" in out
     assert "turn_shift" in out
     assert "AUROC" in out
+
+
+def test_phase1(capsys) -> None:
+    assert main(["phase1", "--steps", "4", "--seed", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "jepa:surprise" in out
+    assert "freeze_backbone=True" in out
+    assert "PHASE0_INTERIM_FINDINGS" in out
+    assert "Phase 2" in out

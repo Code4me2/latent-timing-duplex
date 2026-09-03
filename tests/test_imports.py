@@ -7,11 +7,11 @@ def test_package_metadata() -> None:
     import latent_timing_duplex as ltd
 
     assert ltd.__version__ == "0.1.0"
-    assert ltd.__phase__ == 0
+    assert ltd.__phase__ == 1
 
 
 def test_submodule_imports() -> None:
-    from latent_timing_duplex import baselines, data, eval, extract, models
+    from latent_timing_duplex import baselines, data, eval, extract, models, phase1
     from latent_timing_duplex.baselines.vap import VAPBaseline
     from latent_timing_duplex.data.candor import CandorPipeline
     from latent_timing_duplex.data.duplexchat import DuplexChatPipeline
@@ -37,3 +37,5 @@ def test_submodule_imports() -> None:
     assert baselines.__doc__
     assert eval.__doc__
     assert extract.__doc__
+    assert phase1.__doc__
+    assert phase1.PHASE1_HORIZONS_S == (0.08, 1.00, 5.00)

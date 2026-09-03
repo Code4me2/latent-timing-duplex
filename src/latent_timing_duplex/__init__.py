@@ -1,10 +1,16 @@
 """Latent predictive objectives for timing control in full-duplex dialogue.
 
-Phase 0: synthetic eval harness, Moshi delay-NaN NLL, frozen VAP (CPU).
-No model weights, corpora, or Phase 1/2 heads ship in this package.
+Phase 0 (frozen): synthetic eval harness, Moshi delay-NaN NLL, frozen VAP.
+Phase 1 (scaffolding): JEPA-style predictor heads on frozen Moshi hidden
+states. No Phase 2 fine-tuning. No model weights or corpora ship here.
 """
 
-from latent_timing_duplex.exceptions import Phase0NotImplemented, WeightsNotBundled
+from latent_timing_duplex.exceptions import (
+    Phase0NotImplemented,
+    Phase1NotImplemented,
+    Phase2OutOfScope,
+    WeightsNotBundled,
+)
 from latent_timing_duplex.types import (
     ChunkSignal,
     DualChannelSession,
@@ -14,13 +20,15 @@ from latent_timing_duplex.types import (
 )
 
 __version__ = "0.1.0"
-__phase__ = 0
+__phase__ = 1
 
 __all__ = [
     "ChunkSignal",
     "DualChannelSession",
     "HorizonScore",
     "Phase0NotImplemented",
+    "Phase1NotImplemented",
+    "Phase2OutOfScope",
     "TurnEvent",
     "TurnEventKind",
     "WeightsNotBundled",
