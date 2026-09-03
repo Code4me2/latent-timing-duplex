@@ -30,3 +30,14 @@ def test_eval_config_horizons() -> None:
     cfg = load_config("eval.yaml")
     assert cfg["eval"]["horizons_s"] == [0.16, 0.32, 0.50, 1.00, 2.00]
     assert "turn_shift" in cfg["eval"]["event_kinds"]
+
+
+def test_phase1_config() -> None:
+    cfg = load_config("phase1.yaml")
+    assert cfg["project"]["phase"] == 1
+    assert cfg["phase1"]["horizons_s"] == [0.08, 1.00, 5.00]
+    assert cfg["phase1"]["train"]["freeze_backbone"] is True
+    assert cfg["phase1"]["eval"]["prefer_fixed_windows"] is True
+    assert cfg["phase1"]["eval"]["window_mode"] == "mid"
+    assert "phase2_finetune" in cfg["phase1"]["out_of_scope"]
+    assert cfg["phase1"]["spark_paths"]["phase1_root"] == "/home/velvet/cs199-phase1-work"

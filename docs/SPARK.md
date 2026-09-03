@@ -84,7 +84,13 @@ to Moshi codebook NLL):
 
 ## What this repo will not do
 
-- Re-run the Spark job
+- Re-run the Phase 0 Spark job
 - Download CANDOR
-- Implement Phase 1 JEPA heads or Phase 2 policy conditioning
 - Fetch Moshi / BayLing / VAP weights
+- Phase 2 backbone fine-tuning
+
+Phase 1 head training (small MLP, CPU or Spark) is planned in
+[PHASE1_PLAN.md](PHASE1_PLAN.md). Frozen Moshi hidden-state caches go under
+`/home/velvet/cs199-phase1-work/`; do not write them into the Phase 0
+`cs199-*-work` trees above. Phase 0 numbers stay in
+[PHASE0_INTERIM_FINDINGS.md](PHASE0_INTERIM_FINDINGS.md).

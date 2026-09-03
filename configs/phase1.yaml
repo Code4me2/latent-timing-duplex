@@ -1,0 +1,47 @@
+# Phase 1 scaffolding defaults. No downloads. Backbone stays frozen.
+
+project:
+  phase: 1
+  title: Latent Predictive Objectives for Timing Control in Full-Duplex Dialogue Models
+
+chunk:
+  duration_s: 0.08
+  left: user
+  right: assistant
+
+phase1:
+  # Predictor look-ahead (not the turn-event eval grid).
+  horizons_s: [0.08, 1.00, 5.00]
+  lambda_reg: [0.0, 0.1, 1.0, 10.0]
+  head:
+    type: mlp
+    hidden_dim: 4096
+    width: 512
+    embed_dim: 256
+    n_layers: 2
+    max_params: 10000000
+  train:
+    device: cpu
+    freeze_backbone: true
+    batch_size: 32
+    lr: 1.0e-3
+    max_steps: 0
+  eval:
+    protocol: docs/EVAL_PROTOCOL_PHASE0.md
+    findings: docs/PHASE0_INTERIM_FINDINGS.md
+    prefer_fixed_windows: true
+    window_s: 180.0
+    window_mode: mid
+    event_horizons_s: [0.16, 0.32, 0.50, 1.00, 2.00]
+    compare_to: [moshi_nll, vap_p_shift]
+  spark_paths:
+    phase1_root: /home/velvet/cs199-phase1-work
+    candor_work: /home/velvet/cs199-candor-work
+    duplexchat_work: /home/velvet/cs199-duplexchat-work
+    moshi_work: /home/velvet/cs199-moshi-work
+    bayling_work: /home/velvet/cs199-bayling-work
+    vap_work: /home/velvet/cs199-vap-work
+  out_of_scope:
+    - phase2_finetune
+    - unfreeze_moshi
+    - unfreeze_bayling

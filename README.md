@@ -11,7 +11,7 @@
 
 Full-duplex spoken dialogue models (Moshi, SyncLLM, BayLing-Duplex) bury *speak* vs. *listen* inside next-token sampling. This project tests a JEPA-style latent predictor of the next user-audio chunk, and treats prediction error (“surprise”) as an explicit salience signal for the dialogue policy.
 
-**This repository is Phase 0.** It does not download weights or corpora, does not implement Phase 1 predictor heads or Phase 2 policy conditioning, and does not re-run Spark jobs. A 10-clip DuplexChat EN slice was already measured on Spark; those numbers are reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
+**This repository is Phase 0 (frozen) plus Phase 1 scaffolding.** It does not download weights or corpora, does not implement Phase 2 policy conditioning, and does not re-run Spark jobs. Phase 0 numbers live in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) — do not invent them. A 10-clip DuplexChat EN slice is also recorded as reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
 
 Whether the *implicit* next-token signal is already predictive of turn events is a reportable Phase 0 result, including a negative one.
 
@@ -19,13 +19,13 @@ Whether the *implicit* next-token signal is already predictive of turn events is
 
 | Phase | Scope | In this repo now |
 |---|---|---|
-| **0** (weeks 1–5) | Inference wrappers, VAP baseline, 200–500 h working subset, eval harness, frozen user-channel NLL | Synthetic harness, Moshi delay-NaN NLL, CPU VAP, Spark 10-clip reference. See [PHASE0.md](PHASE0.md) and [docs/SPARK.md](docs/SPARK.md). |
-| **1** | JEPA-style latent predictor on the next user-audio chunk; surprise as salience | One-line pointer only. Not implemented. |
-| **2** | Condition the dialogue policy on that salience signal | One-line pointer only. Not implemented. |
+| **0** (weeks 1–5) | Inference wrappers, VAP baseline, 200–500 h working subset, eval harness, frozen user-channel NLL | **Frozen.** Synthetic harness, Moshi delay-NaN NLL, CPU VAP, Spark 10-clip reference. Findings: [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md). Protocol: [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md). |
+| **1** | JEPA-style latent predictor on the next user-audio chunk; surprise as salience | **Scaffolding.** Plan + CPU head/loss/dataset/surprise hook. No Phase 2. See [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). |
+| **2** | Condition the dialogue policy on that salience signal | Out of scope. `Phase2OutOfScope` if a caller tries to unfreeze a backbone. |
 
-Phase 1/2 work starts only after the Phase 0 gate: the harness exists, a frozen implicit signal can be scored, and a VAP baseline is on the same metric.
+Phase 0 is frozen (equal-length windows; prefer fixed-W). Phase 1 trains **small heads only** on frozen Moshi hidden states. Velvet approved starting Phase 1 after that freeze.
 
-## Current scope (Phase 0 only)
+## Current scope (Phase 0 freeze + Phase 1 scaffolding)
 
 Implemented:
 
@@ -35,14 +35,16 @@ Implemented:
 - Moshi frozen user-channel NLL: `LMModel.forward` + delay-NaN mask (`extract/nll.py`); `load(local_dir=...)` only
 - Frozen ErikEkstedt/VAP baseline, CPU-ok (`baselines/vap.py`); `load(local_checkpoint=...)` only
 - Spark 10-clip DuplexChat EN reference numbers (`ltd reference`) — do not re-measure
+- Phase 1 skeleton (`latent_timing_duplex.phase1`): chunked stereo dataset (LEFT=user), frozen Moshi hidden-state interface, target-embedding interface, small MLP / tiny Transformer head, MSE + isotropic-Gaussian regularizer, CPU train-loop stub, surprise → existing harness. `ltd phase1` runs the synthetic path.
 
 Not implemented (intentionally):
 
 - Downloading Moshi / BayLing-Duplex / GLM-4-Voice / VAP weights (local paths only)
 - Reconstructing DuplexChat from podcasts
 - Accessing or converting CANDOR
-- Re-running the Spark 10-clip job
-- Training loops, notebooks-as-product, Phase 1 heads, Phase 2 policy code
+- Re-running Phase 0 Spark jobs
+- Live Moshi hidden-state extract (reserved for `spark-61dd` caches)
+- Phase 2 policy conditioning or backbone fine-tuning
 
 ## Model and data ids (honest, not installed)
 
@@ -85,10 +87,13 @@ ltd status
 ltd check
 ltd reference
 ltd harness
+ltd phase1
 pytest
 ```
 
 `ltd harness` scores a synthetic salience signal (and a random control) for turn shifts, backchannels, and barge-ins at 0.16–2.0 s horizons. That path needs no weights.
+
+`ltd phase1` trains a tiny CPU head on fake hidden states, wraps prediction error as surprise, and scores it on the same harness (equal-length mid-window demo). No GPU and no checkpoints.
 
 `ltd reference` prints the measured Spark 10-clip numbers (Moshi NLL, BayLing-Duplex token NLL, VAP CPU). Do not re-run Spark.
 
@@ -103,16 +108,21 @@ src/latent_timing_duplex/
   baselines/     frozen VAP (CPU, local checkpoint)
   eval/          harness: per-chunk signal in, turn-event scores out
   extract/       Moshi LMModel.forward + delay-NaN user-channel NLL
-configs/         YAML defaults + spark_slice.yaml reference numbers
-docs/SPARK.md    aarch64 cu130 notes; do not re-run Spark
-tests/           harness, delay-NaN NLL, VAP pooling, Spark reference
+  phase1/        JEPA head skeleton (dataset, hidden, targets, loss, train, surprise)
+configs/         YAML defaults + spark_slice.yaml + phase1.yaml
+docs/            SPARK.md, Phase 0 freeze, PHASE1_PLAN.md
+tests/           harness, delay-NaN NLL, VAP pooling, Spark reference, Phase 1 shapes/losses
 ```
 
 Local `./data`, `./weights`, and `./cache` are gitignored. Create them yourself after you have access.
 
-## What comes later
+## Phase 0 → Phase 1
 
-Phase 1 adds a JEPA-style latent predictor and uses its error as salience. Phase 2 conditions the dialogue policy on that signal. Neither is implemented here.
+Phase 0 asked whether frozen user-channel NLL (and VAP) already predict turn events. That work is **frozen**: equal-length windows, documented slices, no invented digits. Read [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) and [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md) before comparing any new signal to those baselines. Prefer fixed windows (mid-180 primary).
+
+Phase 1 (this repo now) precomputes frozen Moshi hidden states and user-chunk embeddings, then trains a **small** predictor head (single-digit millions of params) with a JEPA-style isotropic-Gaussian regularizer. Surprise is the per-chunk prediction error and plugs into the same harness. Moshi / BayLing stay frozen. Operational steps, Spark paths (`/home/velvet/cs199-*`), ablations (80 ms / 1 s / 5 s × λ), and success criteria: [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md).
+
+Phase 2 (policy conditioning / backbone fine-tune) is **not** started. `freeze_backbone=False` raises `Phase2OutOfScope`.
 
 ## Citation
 
