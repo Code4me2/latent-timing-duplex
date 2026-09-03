@@ -1,5 +1,7 @@
-# Phase 0 matched evaluation protocol (draft freeze)
+# Phase 0 matched evaluation protocol (FREEZE)
 CS 199 · Latent Predictive Objectives for Timing Control · 2026-09-03 PT
+
+**Status: Phase 0 FREEZE** — freeze criteria met pending merge to `main`. Phase 1 requires a separate go/no-go.
 
 ## Purpose
 Freeze how frozen Moshi / BayLing / VAP baselines are computed and compared across DuplexChat and CANDOR before Phase 1 changes models or objectives.
@@ -29,8 +31,8 @@ Primary cross-corpus contrast: **DuplexChat expanded** vs **part001 excluding pi
 1. Channel packing LEFT=user: spot-check PASS (no remap)
 2. Sample rate 48→24 kHz on CANDOR20: Moshi Δ≈0; full-length gap to DuplexChat holds
 3. Duration NN matching: supports disjoint; full-length Moshi gap holds on 18 shortest CANDOR; VAP overlaps
-4. Fixed-length first-W window Moshi NLL: **done** (gap vanishes; CIs overlap; point estimate reverses)
-5. Mid-window equal-length Moshi NLL: pending / attach when done
+4. Fixed-length first-W window Moshi NLL: **done** (gap vanishes; CIs overlap; first-180 point estimate reverses)
+5. Mid-window equal-length Moshi NLL: **done** (same n=12 center crop; CIs overlap; first-180 reverse does not hold mid-conversation). Random-offset CIs also overlap.
 
 ## Do not do under this protocol
 - Download CANDOR parts 002–034 unless a new protocol version says so
@@ -39,4 +41,4 @@ Primary cross-corpus contrast: **DuplexChat expanded** vs **part001 excluding pi
 - Claim timing-objective success from VAP p(shift) alone when CIs overlap
 
 ## Phase 0 freeze criterion
-After the mid-window check, Phase 0 can freeze with engineering success + no robust Moshi cross-corpus effect under equal length; VAP overlaps throughout expanded comparisons. Required: (a) findings doc on main reflects the above slices, (b) channel + sample-rate + duration + first-W checks documented, (c) mid-window equal-length Moshi check reported, (d) this protocol filed in `docs/`. Then Phase 1 may begin under a separate training protocol.
+**FREEZE status:** criteria met pending merge to `main`. Engineering success + no robust Moshi cross-corpus effect under equal length; VAP overlaps throughout expanded comparisons. Documented: (a) findings doc reflects the above slices, (b) channel + sample-rate + duration + first-W checks, (c) mid-window equal-length Moshi check, (d) this protocol filed in `docs/`. Phase 1 requires a separate go/no-go and must not start under this protocol.

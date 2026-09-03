@@ -1,9 +1,9 @@
 # CS 199 Phase 0 interim findings
 **Latent Predictive Objectives for Timing Control in Full-Duplex Dialogue Models**  
-Velvet Reichman · Indika Walimuni · CCSF CS 199 · draft 2026-09-03 (PT)
+Velvet Reichman · Indika Walimuni · CCSF CS 199 · Phase 0 FREEZE 2026-09-03 (PT)
 
 ## Status
-Phase 0 frozen baseline pipeline is operational on `spark-61dd` (Linux aarch64, GB10/`sm_121`, CUDA 13). Engineering validation is complete for Moshi, BayLing-Duplex, and VAP on stereo duplex audio. Full-length Moshi corpus differences are descriptive only: they do not survive equal-length first-W windows. Scientific claims remain provisional; mid-window pending.
+**Phase 0 FREEZE** (criteria met pending merge to `main`). Frozen baseline pipeline is operational on `spark-61dd` (Linux aarch64, GB10/`sm_121`, CUDA 13). Engineering validation succeeded for Moshi, BayLing-Duplex, and VAP on stereo duplex audio. Under equal-length windows the Moshi cross-corpus gap is not significant. Full-length CANDOR-worse Moshi numbers are descriptive / length-confounded only. Phase 1 requires a separate go/no-go.
 
 ## What ran
 | Slice | n (conversations) | Duration | Notes |
@@ -19,6 +19,8 @@ Phase 0 frozen baseline pipeline is operational on `spark-61dd` (Linux aarch64, 
 | Duration-matched (18 shortest CANDOR) | 18 vs DC expanded n=18 | median 1681 s vs DC 230 s | 1:1 NN w/o replacement; supports DISJOINT |
 | Fixed-window first-W=180 s (t=0) | exact-W pairs n=12 | 180 s each | 6 DC <180 s excluded; CANDOR 24 kHz; Moshi NLL |
 | Fixed-window first-W=300 s (t=0) | n=5 | 300 s each | Same verdict as W=180; Moshi audio |
+| Mid-window 180 s (center crop) | same n=12 primary pairs | 180 s each | B=10000 seed `20260903`; Moshi audio |
+| Random-offset 180 s | same n=12; vs DC mid | 180 s | CANDOR random-offset vs DuplexChat mid |
 
 Fixed settings: Moshi frozen NLL (`NO_CUDA_GRAPH=1`, `NO_TORCH_COMPILE=1`, nan-safe forward); BayLing-Duplex frozen token NLL (SDPA, no flash-attn); VAP CPU-only. Channel convention **LEFT=user, RIGHT=agent** validated 2026-09-03: 3/3 CANDOR and 3/3 DuplexChat spot-checks PASS; no remap. CANDOR: channel_map ObjectIds match speakers/transcript; exclusive-turn energy 7–27× prefers mapped channel. DuplexChat: packing LEFT=stream0/speaker A; SPEAKER_XX labels do not bind per-turn to L/R, but channels are distinct and both active (medium-high confidence).
 
@@ -78,7 +80,18 @@ W=180 s from t=0; exact-W pairs n=12 (6 DuplexChat episodes <180 s excluded); CA
 | CANDOR (first 180 s) | 0.558 [0.524, 0.594] |
 | DuplexChat (first 180 s) | 0.619 [0.579, 0.665] |
 
-CIs overlap; the point estimate **reverses** (CANDOR lower, not higher). Text NLL also overlaps. W=300 s n=5 same verdict: CANDOR 0.570 [0.528, 0.613] vs DuplexChat 0.654 [0.593, 0.712]. Conclusion: the full-length / duration-NN Moshi “gap” was length-confounded; equal-length first-W windows show no durable CANDOR-higher-NLL effect. Mid-window pending.
+CIs overlap; the point estimate **reverses** (CANDOR lower, not higher; Δ −0.061). Text NLL also overlaps. W=300 s n=5 same verdict: CANDOR 0.570 [0.528, 0.613] vs DuplexChat 0.654 [0.593, 0.712]. The first-180 reverse does not hold mid-conversation (below); greeting/position explains the reverse.
+
+### Mid-window and random-offset Moshi NLL
+Same n=12 primary pairs; center crop; bootstrap B=10000, seed `20260903`.
+
+| Window | CANDOR audio NLL | DuplexChat audio NLL | Gap (C−DC) |
+|---|---|---|---|
+| First-180 (t=0) | 0.558 [0.524, 0.594] | 0.619 [0.579, 0.665] | −0.061 (CIs overlap; reverse) |
+| Mid-180 (center crop) | 0.640 [0.601, 0.685] | 0.593 [0.547, 0.636] | +0.047 (CIs overlap) |
+| Random-offset CANDOR vs DC mid | 0.619 [0.589, 0.651] | 0.593 [0.547, 0.636] (DC mid) | +0.026 (CIs overlap) |
+
+The first-180 reverse (−0.061) does not hold mid-conversation; greeting/position explains the reverse. Under equal-length windows the Moshi cross-corpus gap is not significant.
 
 ### BayLing (not comparable to Moshi)
 BayLing token NLL / perplexity uses a different vocabulary and objective. Report only as a separate frozen baseline: DuplexChat10 dw NLL ~7.17 (PPL ~1297); DuplexChat expanded token NLL 9.283 [8.192, 10.454]; CANDOR20 dw NLL ~8.80 (PPL ~6667); CANDOR rest dw 9.035 [8.463, 9.475]. Do **not** rank Moshi vs BayLing on these numbers.
@@ -89,11 +102,13 @@ BayLing token NLL / perplexity uses a different vocabulary and objective. Report
 3. **Full-length Moshi “gap” is descriptive, not a durable contrast.** At full length, CANDOR part001 CIs (rest 0.623 [0.607, 0.639]; pooled excl. pilot 0.619 [0.609, 0.630]; full 0.622 [0.613, 0.632]) do not overlap DuplexChat expanded 0.549 [0.483, 0.605]. That contrast does **not** survive equal-length windows and is demoted from the primary scientific claim. VAP `p(shift)` CIs overlap DuplexChat expanded 0.506 [0.408, 0.608] throughout expanded comparisons. The earlier DuplexChat10 non-overlap on `p(shift)` was fragile at n=5.
 4. **Sample rate is not the full-length Moshi NLL difference.** CANDOR20 48→24 kHz audio dw 0.616 [0.603, 0.628] vs 0.618 [0.606, 0.629]; pairwise Δ +0.0021 [−0.0016, +0.0056] includes 0. Reverse DuplexChat→48 kHz skipped because 24k≈48k.
 5. **Duration NN cannot equalize support.** Supports are DISJOINT (CANDOR min 1538 s > DC max 904 s). On the 18 shortest CANDOR (median 1681 s vs DC 230 s), full-length Moshi audio dw 0.625 [0.605, 0.644] vs DC 0.549 [0.483, 0.605]; CIs still fail to overlap (barely). VAP `p(shift)` overlaps: matched 0.484 [0.435, 0.532] vs DC 0.506 [0.408, 0.608]. This remains a length-confounded comparison.
-6. **Equal-length first-W windows: no durable CANDOR-higher-NLL effect.** W=180 s from t=0, exact-W pairs n=12 (6 DC <180 s excluded), CANDOR 24 kHz: Moshi audio CANDOR 0.558 [0.524, 0.594] vs DuplexChat 0.619 [0.579, 0.665]; CIs overlap and the point estimate reverses. Text overlaps. W=300 s n=5 same verdict (CANDOR 0.570 [0.528, 0.613] vs DC 0.654 [0.593, 0.712]). The full-length / duration-NN Moshi “gap” was length-confounded.
-7. **Caveats.** DuplexChat10 n=5 episodes is small and CIs are wide; expanded n=18 still has a wide `p(shift)` interval; W=180 keeps n=12 and W=300 n=5. Corpora still differ in genre and reconstruction path. Channel packing passed automated spot-check but remains a documented convention (especially DuplexChat SPEAKER_XX unbound to L/R). Phase 0 engineering succeeded; there is **no** robust Moshi cross-corpus effect under equal length. This is **not** confirmation of a latent predictive timing objective. Next: mid-window equal-length Moshi NLL, then freeze.
+6. **Equal-length first-W windows: no durable CANDOR-higher-NLL effect.** W=180 s from t=0, exact-W pairs n=12 (6 DC <180 s excluded), CANDOR 24 kHz: Moshi audio CANDOR 0.558 [0.524, 0.594] vs DuplexChat 0.619 [0.579, 0.665]; CIs overlap and the point estimate reverses (Δ −0.061). Text overlaps. W=300 s n=5 same verdict (CANDOR 0.570 [0.528, 0.613] vs DC 0.654 [0.593, 0.712]).
+7. **Mid-window: first-180 reverse does not hold.** Same n=12, center crop: mid audio CANDOR 0.640 [0.601, 0.685] vs DC 0.593 [0.547, 0.636]; gap +0.047; CIs overlap. Greeting/position explains the first-180 reverse. Random-offset CANDOR 0.619 [0.589, 0.651] vs DC mid; gap +0.026; CIs overlap.
+8. **Overall (Phase 0 freeze).** Engineering validation succeeded. Under equal-length windows the Moshi cross-corpus gap is not significant. VAP `p(shift)` overlaps in expanded comparisons. Full-length CANDOR-worse Moshi numbers are descriptive / length-confounded only. This is **not** confirmation of a latent predictive timing objective. Phase 1 requires a separate go/no-go.
+9. **Caveats.** DuplexChat10 n=5 episodes is small and CIs are wide; expanded n=18 still has a wide `p(shift)` interval; equal-length windows keep n=12 (W=300 n=5). Corpora still differ in genre and reconstruction path. Channel packing passed automated spot-check but remains a documented convention (especially DuplexChat SPEAKER_XX unbound to L/R).
 
 ## Artifact paths (spark-61dd)
-- CANDOR: `/home/velvet/cs199-candor-work/` (`nll_candor20_moshi.jsonl`, `nll_candor20_bayling.jsonl`, `vap_candor20.jsonl`, `candor20_summary.json`, `candor_rest_summary.json`, `candor_part001_pooled_summary.json`, `nll_candor25_*.jsonl`, `vap_candor25.jsonl`, `candor20_24khz_summary.json`, `nll_candor20_24khz_moshi.jsonl`, `duration_matched_summary.json`, `duration_matched_summary.md`, `duration_matched_pairs.json`, `window180_summary.json`, `bootstrap_ci.py`)
+- CANDOR: `/home/velvet/cs199-candor-work/` (`nll_candor20_moshi.jsonl`, `nll_candor20_bayling.jsonl`, `vap_candor20.jsonl`, `candor20_summary.json`, `candor_rest_summary.json`, `candor_part001_pooled_summary.json`, `nll_candor25_*.jsonl`, `vap_candor25.jsonl`, `candor20_24khz_summary.json`, `nll_candor20_24khz_moshi.jsonl`, `duration_matched_summary.json`, `duration_matched_summary.md`, `duration_matched_pairs.json`, `window180_summary.json`, `window180_mid_summary.json`, `bootstrap_ci.py`)
 - DuplexChat: `/home/velvet/cs199-duplexchat-work/` (`duplexchat10_summary.json`, `bootstrap_ci_duplexchat10.py`, `duplexchat_expanded_*`)
 - Prior DuplexChat JSONLs: `/home/velvet/cs199-moshi-work/nll_duplexchat10.jsonl`, `/home/velvet/cs199-bayling-work/nll_duplexchat10.jsonl`, `/home/velvet/cs199-vap-work/vap_duplexchat10.jsonl`
 - Repo: GitHub `Code4me2/latent-timing-duplex` `main` @ `7366e5f` (Origin mirror may lag)
@@ -104,15 +119,15 @@ BayLing token NLL / perplexity uses a different vocabulary and objective. Report
 3. ~~Remaining part_001 CANDOR UUIDs~~ **done** (rest n=25; pooled excl. pilot n=45; full part001 n=50).
 4. ~~Controlled sample-rate check (CANDOR 48 kHz vs DuplexChat 24 kHz)~~ **done** (Moshi NLL; 24k≈48k; reverse DC→48k skipped).
 5. ~~Duration-matched reanalysis~~ **done** (supports DISJOINT; full-length Moshi difference is length-confounded). Matched protocol filed in `docs/EVAL_PROTOCOL_PHASE0.md`.
-6. ~~Fixed-length first-W-seconds Moshi NLL~~ **done** (W=180 n=12 and W=300 n=5; CIs overlap; point estimate reverses; no durable CANDOR-higher-NLL effect).
-7. Mid-window equal-length Moshi NLL, then Phase 0 freeze (engineering success + no robust Moshi cross-corpus effect under equal length; VAP overlaps throughout expanded comparisons).
-8. Only then start latent predictive objective training (Phase 1), under a separate training protocol.
+6. ~~Fixed-length first-W-seconds Moshi NLL~~ **done** (W=180 n=12 and W=300 n=5; CIs overlap; point estimate reverses).
+7. ~~Mid-window and random-offset Moshi NLL~~ **done** (same n=12; mid gap +0.047 and random-offset +0.026; CIs overlap; first-180 reverse does not hold).
+8. ~~Phase 0 freeze criteria~~ **met** pending merge to `main`.
+9. Phase 1 requires a separate go/no-go (do not start latent-objective training under this protocol).
 
 ## Channel spot-check artifacts
 `/home/velvet/cs199-candor-work/channel_spotcheck.json` and `.md` (copies under duplexchat work dir).
 
 ## Not done yet
-- Phase 1/2 latent objectives
-- Mid-window equal-length Moshi NLL
+- Phase 1/2 latent objectives (separate go/no-go required)
 - Full CANDOR dump (parts 002–034)
 - BayLing `load()` harness completion in-repo (BayLing smoke/NLL ran out-of-tree successfully)
