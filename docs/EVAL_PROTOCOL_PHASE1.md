@@ -20,7 +20,9 @@ The scorer emits AUROC, AUPRC, and precision-recall operating points for every
 named signal. The Spark interim write-up is
 [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md) (weakly predictive on a
 CANDOR transcript proxy first; evening-PT addendum is a channel-energy
-VAD pool, not gold, not Phase 2). Silence/collapse on the same mid-180
+VAD pool, not gold, not Phase 2). Pooled eval-horizon CIs
+(EVENT_HORIZON_GRID, B=10000) live in that note; they do not replace
+the first primary. Silence/collapse on the same mid-180
 pool is a **different question** (representation flatline in mutual
 silence, not turn-event AUROC):
 [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md) (criterion not
