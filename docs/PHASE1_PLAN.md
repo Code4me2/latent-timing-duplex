@@ -11,11 +11,12 @@ Do not copy or invent them here. Comparisons use the equal-length window
 protocol in [EVAL_PROTOCOL_PHASE0.md](EVAL_PROTOCOL_PHASE0.md) (prefer fixed
 windows; full-length Moshi gaps are descriptive / length-confounded only).
 Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy
-VAD addendum, H=12 λ=0.01, mid-180):
-[PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md). That note is not a freeze
-and is not Phase 2. VAD ≠ gold. Silence/collapse diagnostic (57 mid-180
-sessions, channel-energy masks; criterion **not met**, 0/57; not a
-timing win): [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md).
+VAD addendum, H=12 λ=0.01, mid-180; pooled EVENT_HORIZON_GRID CIs, not a
+freeze): [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md). That note is not
+a freeze and is not Phase 2. VAD ≠ gold. Silence/collapse diagnostic
+(57 mid-180 sessions, channel-energy masks; criterion **not met**,
+0/57; not a timing win):
+[PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md).
 
 ## Goal
 

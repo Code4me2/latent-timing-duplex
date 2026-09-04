@@ -73,6 +73,19 @@ Sessions meeting a collapse / flatline criterion: **0 / 57**.
   one window, two λ. CIs and per-session dumps live on Spark; this note
   does not invent them.
 
+## Related — EVENT_HORIZON_GRID (RQ2, not collapse)
+Pooled H=12 λ=0.01 `turn_shift` AUROC CIs (B=10000; proxies not gold)
+live in [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md) under
+**EVENT_HORIZON_GRID**. Strongest offline edge at 0.5–1.0 s; weakens at
+2.0 s. That grid is a turn-event ranking, **not** this collapse
+diagnostic, and is **not a timing win**.
+
+External sibling (not vendored):
+
+```
+/home/velvet/cs199-phase1-work/eval/windows/mid180/EVENT_HORIZON_GRID.md
+```
+
 ## Artifact paths (spark-61dd, external)
 This repository does not vendor the JSON or the Spark write-up. CI must
 not open these paths.

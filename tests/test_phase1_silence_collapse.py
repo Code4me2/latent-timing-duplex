@@ -42,6 +42,13 @@ def test_silence_collapse_note_exists_and_does_not_overclaim() -> None:
     assert "not a timing win" in text.lower()
     assert "flatline" in text.lower()
     assert "PHASE1_RQ2_INTERIM.md" in text
+    # Related EVENT_HORIZON_GRID pointer (RQ2, not this collapse check).
+    assert "EVENT_HORIZON_GRID" in text
+    assert (
+        "/home/velvet/cs199-phase1-work/eval/windows/mid180/"
+        "EVENT_HORIZON_GRID.md"
+    ) in text
+    assert "not collapse" in text.lower() or "not this collapse" in text.lower()
     # Must not upgrade the null into a timing or Phase 2 claim.
     lowered = text.lower()
     assert "timing control works" not in lowered
