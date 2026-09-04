@@ -169,8 +169,8 @@ not license a detector or a Phase 2 start.
 Silence/collapse on the same mid-180 pool is a **different question**
 (representation flatline in mutual silence, not turn-event AUROC). That
 proxy diagnostic is in [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md):
-criterion not met (0/57). It does not upgrade this ranking and is not a
-timing win by itself.
+criterion not met (0/57). It does not upgrade this ranking and is
+**not a timing win** by itself.
 
 ## Recommended next
 1. Gold or audited labels (do not treat CSV proxies or channel-energy
