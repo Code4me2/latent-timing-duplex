@@ -12,7 +12,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from latent_timing_duplex.eval.harness import DEFAULT_HORIZONS_S, score_signal, score_session_bundle
-from latent_timing_duplex.phase1.horizons import CHUNK_DURATION_S, pair_indices
+from latent_timing_duplex.phase1.horizons import CHUNK_DURATION_S, pair_indices, pair_indices_frames
 from latent_timing_duplex.types import ChunkSignal, DualChannelSession, HorizonScore, iter_chunks
 
 
@@ -82,6 +82,26 @@ def surprise_from_sequences(
     src, tgt = pair_indices(len(hidden), horizon_s, chunk_duration_s)
     if src.size == 0:
         raise ValueError("not enough chunks for this horizon")
+    pred = np.asarray(predict_fn(np.asarray(hidden)[src]), dtype=np.float64)
+    values = surprise_values(pred, np.asarray(target)[tgt], kind=kind)
+    return surprise_to_chunks(values.tolist(), chunk_duration_s=chunk_duration_s, name=name)
+
+
+def surprise_from_horizon_frames(
+    hidden: np.ndarray,
+    target: np.ndarray,
+    predict_fn,
+    horizon_frames: int,
+    chunk_duration_s: float = CHUNK_DURATION_S,
+    kind: str = "mse",
+    name: str = "jepa:surprise",
+) -> list[ChunkSignal]:
+    """Same as ``surprise_from_sequences`` but with an explicit Spark H."""
+    src, tgt = pair_indices_frames(len(hidden), horizon_frames)
+    if src.size == 0:
+        raise ValueError(
+            f"not enough chunks for H={horizon_frames} (T={len(hidden)})"
+        )
     pred = np.asarray(predict_fn(np.asarray(hidden)[src]), dtype=np.float64)
     values = surprise_values(pred, np.asarray(target)[tgt], kind=kind)
     return surprise_to_chunks(values.tolist(), chunk_duration_s=chunk_duration_s, name=name)

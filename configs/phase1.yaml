@@ -27,13 +27,20 @@ phase1:
     lr: 1.0e-3
     max_steps: 0
   eval:
-    protocol: docs/EVAL_PROTOCOL_PHASE0.md
+    protocol: docs/EVAL_PROTOCOL_PHASE1.md
+    phase0_protocol: docs/EVAL_PROTOCOL_PHASE0.md
     findings: docs/PHASE0_INTERIM_FINDINGS.md
     prefer_fixed_windows: true
     window_s: 180.0
     window_mode: mid
     event_horizons_s: [0.16, 0.32, 0.50, 1.00, 2.00]
+    predictor_horizon_frames: [1, 12, 62]
+    lambda_primary: 0.01
+    lambda_reference: 0.0
+    seed: 20260903
+    bootstrap_b: 10000
     compare_to: [moshi_nll, vap_p_shift]
+    no_phase2: true
   spark_paths:
     phase1_root: /home/velvet/cs199-phase1-work
     candor_work: /home/velvet/cs199-candor-work

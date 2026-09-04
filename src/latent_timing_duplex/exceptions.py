@@ -13,6 +13,14 @@ class Phase1NotImplemented(NotImplementedError):
     """Reserved Phase 1 work item. The interface is real; the body needs Spark / weights."""
 
 
+class Phase1EvalInputMissing(FileNotFoundError):
+    """A Spark-side path the in-repo scorer needs was not supplied or is absent.
+
+    CI never requires these files. Pass ``--ablations-root``, ``--nll-jsonl``,
+    ``--vap-jsonl``, and labels / transcripts when running on spark-61dd.
+    """
+
+
 class Phase2OutOfScope(RuntimeError):
     """Phase 2 fine-tuning is not implemented and must not start from Phase 1."""
 

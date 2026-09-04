@@ -140,15 +140,24 @@ head SGD is the cheap step.
 
 ### 5. Surprise and eval harness
 
+In-repo scorer: `ltd phase1-eval` / `phase1.compare.run_turn_event_eval`.
+Protocol: [EVAL_PROTOCOL_PHASE1.md](EVAL_PROTOCOL_PHASE1.md).
+
 1. `surprise_t = ||hat{z}_{t+h} - z_{t+h}||^2` (MSE; optional Gaussian NLL).
 2. Wrap as `ChunkSignal` (`name="jepa:surprise"`) on the 80 ms grid.
-3. Call existing `eval.harness.score_signal` / `score_session_bundle`.
-4. Bundle named signals on the **same** windows and events:
-   `jepa:surprise`, `nll:moshi`, `vap:p_shift`, plus a random control.
-5. Horizons for the *turn-event* table stay the Phase 0 eval set
-   `{0.16, 0.32, 0.50, 1.00, 2.00}` s unless a protocol revision says
-   otherwise. The **predictor** horizons `{0.08, 1.00, 5.00}` s are a
-   separate ablation (how far ahead the head looks).
+3. Align Phase 0 Moshi NLL JSONL and VAP `p(shift)` / `p_now` on the **same**
+   `t_end` indices (intersect when surprise is `T−H`).
+4. Labels: gold `--labels` JSONL, or transcript / VAD proxies
+   (`phase1.labels`). Proxies are not official annotations.
+5. Metrics per signal × event × eval horizon: AUROC, AUPRC, F1-max,
+   precision at recall 0.30 / 0.50 / 0.70. Session-level Efron bootstrap,
+   seed `20260903`, B=10000.
+6. Turn-event eval horizons stay `{0.16, 0.32, 0.50, 1.00, 2.00}` s.
+   Predictor H on Spark is **{1, 12, 62}** frames (not the plan half-up
+   13 / 63). λ primary = 0.01; λ = 0 is the reconstruction reference.
+
+`ltd phase1-eval --synthetic` is the CPU smoke. Real Spark paths are
+caller-supplied (see the protocol). Do not invent findings.
 
 Equal-length protocol (required for Phase 0 comparisons):
 
@@ -183,7 +192,8 @@ Phase 1 scaffolding (this PR) is done when:
 3. Tests lock horizon indexing, regularizer behavior, head shapes /
    param budget, dataset LEFT=user packing, and surprise→harness.
 4. `ltd phase1` runs a synthetic train-step + harness hook.
-5. Phase 2 fine-tune paths raise `Phase2OutOfScope`.
+5. `ltd phase1-eval --synthetic` runs the compare table on fake tensors.
+6. Phase 2 fine-tune paths raise `Phase2OutOfScope`.
 
 Phase 1 *science* (later, on Spark) is done when:
 
@@ -231,8 +241,13 @@ src/latent_timing_duplex/phase1/
   losses.py     MSE + isotropic-Gaussian regularizer
   train.py      head-only loop stub
   surprise.py   surprise metric + harness hook
+  labels.py     gold JSONL + transcript / VAD proxies
+  series.py     NLL / VAP / surprise JSONL alignment
+  checkpoint.py h*_lam* + SELECTION_LOCKED.json
+  compare.py    surprise vs NLL vs VAP on one timeline
   windows.py    equal-length first-W / mid-W crops
   paths.py      spark-61dd path constants
 ```
 
-CLI: `ltd phase1` (synthetic), `ltd check` (imports `phase1`).
+CLI: `ltd phase1` (synthetic train demo), `ltd phase1-eval` (turn-event
+compare; `--synthetic` or Spark paths), `ltd check` (imports `phase1`).
