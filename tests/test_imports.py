@@ -39,3 +39,6 @@ def test_submodule_imports() -> None:
     assert extract.__doc__
     assert phase1.__doc__
     assert phase1.PHASE1_HORIZONS_S == (0.08, 1.00, 5.00)
+    assert phase1.SPARK_TRAINED_HORIZON_FRAMES == (1, 12, 62)
+    assert callable(phase1.run_turn_event_eval)
+    assert callable(phase1.score_aligned_signals)

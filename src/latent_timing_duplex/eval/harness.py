@@ -27,6 +27,22 @@ from latent_timing_duplex.types import (
 DEFAULT_HORIZONS_S = (0.16, 0.32, 0.50, 1.00, 2.00)
 
 
+def frames_and_labels(
+    session: DualChannelSession,
+    signal: Sequence[ChunkSignal],
+    horizon_s: float,
+    event_kind: TurnEventKind,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(t_ends, y, scores)`` for chunks whose horizon is fully observed."""
+    if not signal:
+        raise ValueError("signal must contain at least one chunk")
+    t_ends = np.array([c.t_end for c in signal], dtype=np.float64)
+    values = np.array([c.value for c in signal], dtype=np.float64)
+    times = _event_times(session, event_kind)
+    valid, y = _labels_for_horizon(t_ends, times, float(horizon_s), session.duration_s)
+    return t_ends[valid], y[valid], values[valid]
+
+
 def _event_times(session: DualChannelSession, kind: TurnEventKind) -> np.ndarray:
     return np.array([e.t for e in session.events if e.kind == kind], dtype=np.float64)
 

@@ -48,6 +48,117 @@ def build_parser() -> argparse.ArgumentParser:
     phase1.add_argument("--lambda-reg", type=float, default=1.0)
     phase1.add_argument("--steps", type=int, default=8)
     phase1.add_argument("--seed", type=int, default=0)
+    phase1_eval = sub.add_parser(
+        "phase1-eval",
+        help=(
+            "Turn-event compare: surprise vs Moshi NLL vs VAP on mid-180 "
+            "windows. Paths are caller-supplied; --synthetic needs no files."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Spark-61dd artifact layout (nothing opened unless passed):\n"
+            "  /home/velvet/cs199-phase1-work/ablations/\n"
+            "    SELECTION_LOCKED.json   # horizons.H_set or H_set: [1,12,62]\n"
+            "    h12_lam0.01/checkpoint.pt   # mlp_state_dict / net.0.weight\n"
+            "  hidden/moshi/<slice>/candor_<uuid>.pt  or  dc_<uuid>.pt\n"
+            "  targets/user_chunk/<slice>/candor_<uuid>.pt\n"
+            "  CANDOR extract*/transcription/*.csv   →  --transcripts-dir\n"
+            "Phase 0 JSONLs that only have audio_nll / p_shift_mean /\n"
+            "duration_sec are aggregate-only. RQ2 needs per-step series:\n"
+            "  ltd phase1-export-series --print-schema\n"
+            "Surprise-only dry run (not RQ2): add --surprise-only and omit\n"
+            "the NLL/VAP JSONLs. Do not invent per-step series from means.\n"
+        ),
+    )
+    phase1_eval.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="CPU demo on fake tensors (no Spark paths, no weights)",
+    )
+    phase1_eval.add_argument("--ablations-root", type=str, default=None)
+    phase1_eval.add_argument("--selection-locked", type=str, default=None)
+    phase1_eval.add_argument("--checkpoint", type=str, default=None)
+    phase1_eval.add_argument("--hidden", type=str, default=None)
+    phase1_eval.add_argument("--hidden-dir", type=str, default=None)
+    phase1_eval.add_argument("--target", type=str, default=None)
+    phase1_eval.add_argument("--target-dir", type=str, default=None)
+    phase1_eval.add_argument("--surprise-jsonl", type=str, default=None)
+    phase1_eval.add_argument("--nll-jsonl", type=str, default=None)
+    phase1_eval.add_argument("--vap-jsonl", type=str, default=None)
+    phase1_eval.add_argument("--labels", type=str, default=None)
+    phase1_eval.add_argument(
+        "--transcripts",
+        type=str,
+        default=None,
+        help="JSON/JSONL turns, or a directory of CANDOR-style CSVs",
+    )
+    phase1_eval.add_argument(
+        "--transcripts-dir",
+        type=str,
+        default=None,
+        help="Directory of CANDOR extract*/transcription/*.csv (proxies)",
+    )
+    phase1_eval.add_argument("--vad", type=str, default=None)
+    phase1_eval.add_argument(
+        "--surprise-only",
+        action="store_true",
+        help=(
+            "Score jepa:surprise without NLL/VAP (dry run). Primary RQ2 "
+            "requires per-step --nll-jsonl and --vap-jsonl."
+        ),
+    )
+    phase1_eval.add_argument("--session-id", action="append", default=None)
+    phase1_eval.add_argument(
+        "--horizon-frames",
+        type=int,
+        default=12,
+        help="Predictor H in frames. Spark grid is 1, 12, 62 (default 12).",
+    )
+    phase1_eval.add_argument(
+        "--lambda-reg",
+        type=float,
+        default=0.01,
+        help="Which λ checkpoint to load (primary default 0.01).",
+    )
+    phase1_eval.add_argument(
+        "--lambda-role",
+        type=str,
+        default="primary",
+        choices=("primary", "reference", "other", "synthetic"),
+    )
+    phase1_eval.add_argument("--window-s", type=float, default=180.0)
+    phase1_eval.add_argument(
+        "--window-mode",
+        type=str,
+        default="mid",
+        choices=("mid", "first"),
+    )
+    phase1_eval.add_argument(
+        "--eval-horizons",
+        type=str,
+        default="0.16,0.32,0.50,1.00,2.00",
+        help="Turn-event label horizons in seconds (comma-separated).",
+    )
+    phase1_eval.add_argument("--seed", type=int, default=20260903)
+    phase1_eval.add_argument(
+        "--bootstrap",
+        type=int,
+        default=10000,
+        help="Session-level Efron bootstrap B (protocol default 10000).",
+    )
+    phase1_eval.add_argument("--output", type=str, default=None)
+    export = sub.add_parser(
+        "phase1-export-series",
+        help=(
+            "Print or write per-step Moshi NLL / VAP JSONL schema. "
+            "Does not invent series from Phase 0 aggregates."
+        ),
+    )
+    export.add_argument(
+        "--print-schema",
+        action="store_true",
+        help="Print required per-step fields and the Spark Python snippet",
+    )
     return parser
 
 
@@ -65,6 +176,9 @@ def cmd_status() -> int:
         "  - Spark 10-clip DuplexChat EN reference numbers (ltd reference)\n"
         "  - phase1: frozen-backbone JEPA head stub (MLP, Gaussian regularizer,\n"
         "        surprise → harness). CPU numpy; no weights.\n"
+        "  - phase1-eval: surprise vs Moshi NLL vs VAP on the same mid-180\n"
+        "        windows (AUROC / AUPRC / PR). Paths from Spark; --synthetic\n"
+        "        needs no files. See docs/EVAL_PROTOCOL_PHASE1.md.\n"
         "\n"
         "Local weights only (no download)\n"
         "  - models.moshi.MoshiWrapper              kyutai/moshiko-pytorch-bf16\n"
@@ -82,7 +196,8 @@ def cmd_status() -> int:
         "  - Phase 2 policy conditioning or backbone fine-tuning\n"
         "  - Spark job re-runs (see docs/SPARK.md)\n"
         "\n"
-        "See README.md, PHASE0.md, docs/PHASE1_PLAN.md, and docs/SPARK.md.\n"
+        "See README.md, PHASE0.md, docs/PHASE1_PLAN.md,\n"
+        "docs/EVAL_PROTOCOL_PHASE1.md, and docs/SPARK.md.\n"
         "Phase 0 numbers: docs/PHASE0_INTERIM_FINDINGS.md (do not invent)."
     )
     return 0
@@ -97,7 +212,7 @@ def cmd_check() -> int:
     from latent_timing_duplex.models.bayling_duplex import BayLingDuplexWrapper
     from latent_timing_duplex.models.moshi import MoshiWrapper
     from latent_timing_duplex.phase1.heads import MLPPredictor, count_mlp_parameters
-    from latent_timing_duplex.phase1.horizons import PHASE1_HORIZONS_S
+    from latent_timing_duplex.phase1.horizons import PHASE1_HORIZONS_S, SPARK_TRAINED_HORIZON_FRAMES
 
     default = load_config("default.yaml")
     eval_cfg = load_config("eval.yaml")
@@ -134,6 +249,8 @@ def cmd_check() -> int:
         f"phase1={phase1_cfg['project']['phase']}, "
         f"eval horizons={eval_cfg['eval']['horizons_s']}, "
         f"phase1 horizons={list(PHASE1_HORIZONS_S)}, "
+        f"spark_H={list(SPARK_TRAINED_HORIZON_FRAMES)}, "
+        f"lambda_primary={phase1_cfg['phase1']['eval']['lambda_primary']}, "
         f"mlp_params={n_params}, "
         f"spark_slice={spark_cfg['slice']['id']})"
     )
@@ -274,9 +391,127 @@ def cmd_phase1(horizon_s: float, lambda_reg: float, steps: int, seed: int) -> in
     return 0
 
 
+def cmd_phase1_eval(args: argparse.Namespace) -> int:
+    """Compare surprise / NLL / VAP. ``--synthetic`` is the CI / smoke path."""
+    from pathlib import Path
+
+    from latent_timing_duplex.exceptions import Phase1EvalInputMissing
+    from latent_timing_duplex.phase1.compare import (
+        EvalConfig,
+        EvalPaths,
+        format_compare_report,
+        run_synthetic_compare,
+        run_turn_event_eval,
+        write_report,
+    )
+
+    horizons = tuple(float(x) for x in str(args.eval_horizons).split(",") if x.strip())
+    if args.synthetic:
+        report = run_synthetic_compare(
+            seed=int(args.seed),
+            horizon_frames=int(args.horizon_frames),
+            lambda_reg=float(args.lambda_reg),
+            bootstrap_b=min(int(args.bootstrap), 64),
+        )
+        print(format_compare_report(report))
+        if args.output:
+            write_report(report, args.output)
+            print(f"\nwrote {args.output}")
+        print(
+            "\nSpark real run needs --ablations-root (or --checkpoint + "
+            "--hidden-dir/--target-dir or --surprise-jsonl), --nll-jsonl, "
+            "--vap-jsonl, and --labels or --transcripts/--vad. "
+            "See docs/EVAL_PROTOCOL_PHASE1.md. Do not invent findings."
+        )
+        return 0
+
+    def _p(value: str | None) -> Path | None:
+        return Path(value) if value else None
+
+    paths = EvalPaths(
+        ablations_root=_p(args.ablations_root),
+        selection_locked=_p(args.selection_locked),
+        checkpoint=_p(args.checkpoint),
+        hidden=_p(args.hidden),
+        hidden_dir=_p(args.hidden_dir),
+        target=_p(args.target),
+        target_dir=_p(args.target_dir),
+        surprise_jsonl=_p(args.surprise_jsonl),
+        nll_jsonl=_p(args.nll_jsonl),
+        vap_jsonl=_p(args.vap_jsonl),
+        labels=_p(args.labels),
+        transcripts=_p(args.transcripts),
+        transcripts_dir=_p(getattr(args, "transcripts_dir", None)),
+        vad=_p(args.vad),
+        output=_p(args.output),
+        surprise_only=bool(getattr(args, "surprise_only", False)),
+    )
+    cfg = EvalConfig(
+        window_s=float(args.window_s),
+        window_mode=args.window_mode,
+        eval_horizons_s=horizons,
+        seed=int(args.seed),
+        bootstrap_b=int(args.bootstrap),
+        horizon_frames=int(args.horizon_frames),
+        lambda_reg=float(args.lambda_reg),
+        lambda_role=str(args.lambda_role),
+        surprise_only=bool(getattr(args, "surprise_only", False)),
+    )
+    try:
+        report = run_turn_event_eval(
+            paths,
+            cfg,
+            session_ids=args.session_id,
+        )
+    except Phase1EvalInputMissing as exc:
+        print(f"phase1-eval: missing Spark input: {exc}", file=sys.stderr)
+        print(
+            "Required on spark-61dd (not in CI):\n"
+            "  --ablations-root /home/velvet/cs199-phase1-work/ablations\n"
+            "      (h1_lam0.01/, h12_lam0.01/, h62_lam0.01/ + optional "
+            "SELECTION_LOCKED.json)\n"
+            "  --hidden-dir and --target-dir  (candor_<uuid>.pt / dc_<uuid>.pt "
+            "or .npz)  OR --surprise-jsonl\n"
+            "  --nll-jsonl   per-step Moshi NLL (not audio_nll aggregates)\n"
+            "  --vap-jsonl   per-step VAP (not p_shift_mean aggregates)\n"
+            "  --labels | --transcripts-dir   gold JSONL or CANDOR CSVs\n"
+            "  --surprise-only   omit NLL/VAP (dry run only)\n"
+            "See docs/EVAL_PROTOCOL_PHASE1.md. "
+            "ltd phase1-export-series --print-schema",
+            file=sys.stderr,
+        )
+        return 2
+    print(format_compare_report(report))
+    if args.output:
+        write_report(report, args.output)
+        print(f"\nwrote {args.output}")
+    print(
+        "\nMetrics only. Do not claim surprise beats NLL or VAP from this table. "
+        "See docs/EVAL_PROTOCOL_PHASE1.md."
+    )
+    return 0
+
+
+def cmd_phase1_export_series(args: argparse.Namespace) -> int:
+    from latent_timing_duplex.phase1.export_series import schema_text
+
+    print(schema_text())
+    if not args.print_schema:
+        print(
+            "This command does not run Moshi/VAP without local weights. "
+            "Use --print-schema (always printed) and the Python snippet on Spark."
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:2] == ["phase1", "eval"]:
+        raw = ["phase1-eval", *raw[2:]]
+    if raw[:2] == ["phase1", "export-series"]:
+        raw = ["phase1-export-series", *raw[2:]]
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw)
     if args.command == "status":
         return cmd_status()
     if args.command == "check":
@@ -292,6 +527,10 @@ def main(argv: list[str] | None = None) -> int:
             steps=args.steps,
             seed=args.seed,
         )
+    if args.command == "phase1-eval":
+        return cmd_phase1_eval(args)
+    if args.command == "phase1-export-series":
+        return cmd_phase1_export_series(args)
     parser.error(f"unknown command {args.command}")
     return 2
 

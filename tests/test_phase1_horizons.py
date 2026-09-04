@@ -7,9 +7,16 @@ import pytest
 from latent_timing_duplex.phase1.horizons import (
     CANONICAL_HORIZON_STEPS,
     CHUNK_DURATION_S,
+    MID180_N_FRAMES,
+    MOSHI_HIDDEN_DIM,
     PHASE1_HORIZONS_S,
+    PRIMARY_LAMBDA,
+    PROTOCOL_SEED,
+    REFERENCE_LAMBDA,
+    SPARK_TRAINED_HORIZON_FRAMES,
     horizon_steps,
     pair_indices,
+    pair_indices_frames,
     target_index,
 )
 
@@ -56,6 +63,21 @@ def test_pair_indices_alignment() -> None:
     assert (tgt1 - src1).tolist() == [13] * 7
     empty_s, empty_t = pair_indices(10, 1.00)
     assert empty_s.size == 0 and empty_t.size == 0
+
+
+def test_spark_trained_grid_is_explicit_frames() -> None:
+    assert SPARK_TRAINED_HORIZON_FRAMES == (1, 12, 62)
+    assert MID180_N_FRAMES == 2250
+    assert MOSHI_HIDDEN_DIM == 4096
+    assert PROTOCOL_SEED == 20260903
+    assert PRIMARY_LAMBDA == 0.01
+    assert REFERENCE_LAMBDA == 0.0
+    src, tgt = pair_indices_frames(20, 12)
+    assert src.tolist() == list(range(8))
+    assert (tgt - src).tolist() == [12] * 8
+    # Plan half-up stays 13; do not silently rewrite Spark H=12.
+    assert horizon_steps(1.00) == 13
+    assert horizon_steps(1.00) != 12
 
 
 def test_five_second_offset() -> None:

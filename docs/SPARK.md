@@ -94,3 +94,9 @@ Phase 1 head training (small MLP, CPU or Spark) is planned in
 `/home/velvet/cs199-phase1-work/`; do not write them into the Phase 0
 `cs199-*-work` trees above. Phase 0 numbers stay in
 [PHASE0_INTERIM_FINDINGS.md](PHASE0_INTERIM_FINDINGS.md).
+
+Turn-event compare (surprise vs Moshi NLL vs VAP, mid-180, seed
+`20260903`) is `ltd phase1-eval`. Pass local JSONL / checkpoint paths;
+this repo does not open `/home/velvet/...` unless you do. Flags and the
+H∈{1,12,62} / λ=0.01 protocol: [EVAL_PROTOCOL_PHASE1.md](EVAL_PROTOCOL_PHASE1.md).
+Do not start Phase 2 from that command.

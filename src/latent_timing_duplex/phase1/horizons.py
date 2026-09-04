@@ -21,12 +21,22 @@ import numpy as np
 CHUNK_DURATION_S = 0.08
 PHASE1_HORIZONS_S: tuple[float, ...] = (0.08, 1.00, 5.00)
 
-# Locked table for the ablation grid (half-up of horizon / 0.08).
+# Locked table for the *plan* ablation grid (half-up of horizon / 0.08).
 CANONICAL_HORIZON_STEPS: dict[float, int] = {
     0.08: 1,
     1.00: 13,
     5.00: 63,
 }
+
+# Spark-trained predictor offsets (floor of the same seconds). mid-180 at
+# 12.5 Hz is exactly 2250 frames. Do not silently convert 1 s → 13 here:
+# checkpoints under h12_* / h62_* use these integers.
+SPARK_TRAINED_HORIZON_FRAMES: tuple[int, ...] = (1, 12, 62)
+MID180_N_FRAMES: int = 2250  # 180.0 / 0.08
+MOSHI_HIDDEN_DIM: int = 4096
+PROTOCOL_SEED: int = 20260903
+PRIMARY_LAMBDA: float = 0.01
+REFERENCE_LAMBDA: float = 0.0
 
 
 def horizon_steps(horizon_s: float, chunk_duration_s: float = CHUNK_DURATION_S) -> int:
@@ -65,6 +75,28 @@ def target_index(
     return tgt
 
 
+def pair_indices_frames(
+    n_chunks: int,
+    horizon_frames: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Valid ``(source, target)`` index vectors for an explicit frame offset.
+
+    Use this for Spark checkpoints keyed by ``H∈{1,12,62}``. The half-up
+    helper ``pair_indices`` (1 s → 13) is the plan table, not the trained grid.
+    """
+    if n_chunks < 0:
+        raise ValueError("n_chunks must be non-negative")
+    if horizon_frames < 1:
+        raise ValueError(f"horizon_frames must be >= 1, got {horizon_frames}")
+    n_pairs = n_chunks - int(horizon_frames)
+    if n_pairs <= 0:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty
+    src = np.arange(n_pairs, dtype=np.int64)
+    tgt = src + int(horizon_frames)
+    return src, tgt
+
+
 def pair_indices(
     n_chunks: int,
     horizon_s: float,
@@ -74,10 +106,4 @@ def pair_indices(
     if n_chunks < 0:
         raise ValueError("n_chunks must be non-negative")
     offset = horizon_steps(horizon_s, chunk_duration_s)
-    n_pairs = n_chunks - offset
-    if n_pairs <= 0:
-        empty = np.zeros(0, dtype=np.int64)
-        return empty, empty
-    src = np.arange(n_pairs, dtype=np.int64)
-    tgt = src + offset
-    return src, tgt
+    return pair_indices_frames(n_chunks, offset)

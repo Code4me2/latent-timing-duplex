@@ -39,5 +39,10 @@ def test_phase1_config() -> None:
     assert cfg["phase1"]["train"]["freeze_backbone"] is True
     assert cfg["phase1"]["eval"]["prefer_fixed_windows"] is True
     assert cfg["phase1"]["eval"]["window_mode"] == "mid"
+    assert cfg["phase1"]["eval"]["predictor_horizon_frames"] == [1, 12, 62]
+    assert cfg["phase1"]["eval"]["lambda_primary"] == 0.01
+    assert cfg["phase1"]["eval"]["lambda_reference"] == 0.0
+    assert cfg["phase1"]["eval"]["seed"] == 20260903
+    assert cfg["phase1"]["eval"]["no_phase2"] is True
     assert "phase2_finetune" in cfg["phase1"]["out_of_scope"]
     assert cfg["phase1"]["spark_paths"]["phase1_root"] == "/home/velvet/cs199-phase1-work"

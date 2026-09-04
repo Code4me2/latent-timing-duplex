@@ -18,6 +18,8 @@ def test_check(capsys) -> None:
     out = capsys.readouterr().out
     assert "imports ok" in out
     assert "configs ok" in out
+    assert "spark_H=[1, 12, 62]" in out
+    assert "lambda_primary=0.01" in out
 
 
 def test_reference(capsys) -> None:
@@ -45,3 +47,50 @@ def test_phase1(capsys) -> None:
     assert "freeze_backbone=True" in out
     assert "PHASE0_INTERIM_FINDINGS" in out
     assert "Phase 2" in out
+
+
+def test_phase1_eval_synthetic(capsys) -> None:
+    assert main(["phase1-eval", "--synthetic", "--horizon-frames", "1", "--seed", "20260903"]) == 0
+    out = capsys.readouterr().out
+    assert "jepa:surprise" in out
+    assert "nll:moshi" in out
+    assert "vap:p_shift" in out
+    assert "AUPRC" in out
+    assert "No empirical claim" in out
+
+
+def test_phase1_eval_alias(capsys) -> None:
+    assert main(["phase1", "eval", "--synthetic", "--horizon-frames", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "jepa:surprise" in out
+
+
+def test_phase1_eval_missing_paths(capsys) -> None:
+    assert main(["phase1-eval", "--horizon-frames", "12"]) == 2
+    err = capsys.readouterr().err
+    assert "missing Spark input" in err
+    assert "--nll-jsonl" in err
+
+
+def test_phase1_eval_help(capsys) -> None:
+    raised = False
+    try:
+        main(["phase1-eval", "--help"])
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 0
+    assert raised
+    out = capsys.readouterr().out
+    assert "mlp_state_dict" in out
+    assert "candor_" in out
+    assert "duration_sec" in out
+    assert "surprise-only" in out
+    assert "extract*/transcription" in out or "transcription" in out
+
+
+def test_phase1_export_series_schema(capsys) -> None:
+    assert main(["phase1-export-series", "--print-schema"]) == 0
+    out = capsys.readouterr().out
+    assert "audio_nll_per_step" in out
+    assert "p_shift_per_step" in out
+    assert "FrozenNLLExtractor" in out

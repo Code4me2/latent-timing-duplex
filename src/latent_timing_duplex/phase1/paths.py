@@ -23,6 +23,9 @@ HIDDEN_SUBDIR: Final = "hidden/moshi"
 TARGET_SUBDIR: Final = "targets/user_chunk"
 HEAD_SUBDIR: Final = "heads"
 EVAL_SUBDIR: Final = "eval/windows"
+ABLATIONS_SUBDIR: Final = "ablations"
+SELECTION_LOCKED_NAME: Final = "SELECTION_LOCKED.json"
+GRID_RESULTS_NAME: Final = "grid_results.jsonl"
 
 PRIMARY_SLICES: Final = (
     "duplexchat_expanded",

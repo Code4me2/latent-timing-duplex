@@ -7,6 +7,7 @@ states. No Phase 2 fine-tuning. No model weights or corpora ship here.
 
 from latent_timing_duplex.exceptions import (
     Phase0NotImplemented,
+    Phase1EvalInputMissing,
     Phase1NotImplemented,
     Phase2OutOfScope,
     WeightsNotBundled,
@@ -27,6 +28,7 @@ __all__ = [
     "DualChannelSession",
     "HorizonScore",
     "Phase0NotImplemented",
+    "Phase1EvalInputMissing",
     "Phase1NotImplemented",
     "Phase2OutOfScope",
     "TurnEvent",
