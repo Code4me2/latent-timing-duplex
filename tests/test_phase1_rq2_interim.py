@@ -26,6 +26,30 @@ def test_rq2_interim_note_exists_and_does_not_overclaim() -> None:
     assert "Not Phase 2" in text or "not Phase 2" in text
     assert "different question" in text
     assert "weakly" in text.lower()
+    # Evening-PT cross-corpus channel-energy VAD addendum (not gold).
+    assert "2026-09-03 evening PT" in text
+    assert "cross-corpus proxy" in text.lower()
+    assert "channel-energy" in text.lower()
+    assert "CompositeEventSource" in text
+    assert (
+        "/home/velvet/cs199-phase1-work/eval/"
+        "duplexchat_mid180_channel_energy_vad.jsonl"
+    ) in text
+    assert "25 ms" in text and "10 ms" in text
+    assert "median + 3" in text and "MAD" in text
+    assert "n≈56" in text
+    assert "0.645" in text and "0.115" in text
+    assert "0.463" in text and "0.050" in text
+    assert "0.511" in text and "0.054" in text
+    assert "0.694" in text and "0.148" in text
+    assert "0.522" in text and "0.054" in text
+    assert "0.503" in text and "0.046" in text
+    assert "0.643" in text and "0.125" in text
+    assert "VAD ≠ gold" in text or "vad ≠ gold" in text.lower()
+    assert "n_DC=12" in text
+    assert "not asr" in text.lower()
+    assert text.find("## Primary table") < text.find("## Addendum")
+    assert text.find("0.632") < text.find("0.645")
 
 
 def test_readme_and_plan_link_rq2_interim() -> None:
@@ -35,3 +59,7 @@ def test_readme_and_plan_link_rq2_interim() -> None:
     assert "PHASE1_RQ2_INTERIM.md" in readme
     assert "PHASE1_RQ2_INTERIM.md" in plan
     assert "PHASE1_RQ2_INTERIM.md" in protocol
+    assert "channel-energy" in readme.lower()
+    assert "n≈56" in readme
+    assert "channel-energy" in plan.lower()
+    assert "VAD ≠ gold" in plan or "vad ≠ gold" in plan.lower()

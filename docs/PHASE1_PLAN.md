@@ -10,9 +10,10 @@ Phase 0 numbers live in [PHASE0_INTERIM_FINDINGS.md](PHASE0_INTERIM_FINDINGS.md)
 Do not copy or invent them here. Comparisons use the equal-length window
 protocol in [EVAL_PROTOCOL_PHASE0.md](EVAL_PROTOCOL_PHASE0.md) (prefer fixed
 windows; full-length Moshi gaps are descriptive / length-confounded only).
-Spark RQ2 interim (CANDOR proxy, H=12 λ=0.01, mid-180):
+Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy
+VAD addendum, H=12 λ=0.01, mid-180):
 [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md). That note is not a freeze
-and is not Phase 2.
+and is not Phase 2. VAD ≠ gold.
 
 ## Goal
 
@@ -208,8 +209,8 @@ Phase 1 *science* (later, on Spark) is done when:
 4. A short write-up states whether surprise is predictive, weakly
    predictive, or not predictive relative to those frozen baselines.
    A null is still a result. Interim: [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md)
-   (weakly predictive on a CANDOR transcript proxy; not gold, not
-   cross-corpus).
+   (weakly predictive on a CANDOR transcript proxy; evening-PT addendum
+   is a channel-energy VAD pool, not gold, not Phase 2).
 5. Moshi and BayLing weights were never trained.
 
 ## Out of scope (do not do in Phase 1)
