@@ -47,7 +47,7 @@ def test_rq2_interim_note_exists_and_does_not_overclaim() -> None:
     assert "0.643" in text and "0.125" in text
     assert "VAD ≠ gold" in text or "vad ≠ gold" in text.lower()
     assert "n_DC=12" in text
-    assert "not ASR" in text.lower()
+    assert "not asr" in text.lower()
     assert text.find("## Primary table") < text.find("## Addendum")
     assert text.find("0.632") < text.find("0.645")
 
