@@ -166,9 +166,18 @@ not license a detector or a Phase 2 start.
 - **Still weakly predictive language.** Pooled surprise is above the
   two frozen baselines on this proxy and is not “timing control works.”
 
+Silence/collapse on the same mid-180 pool is a **different question**
+(representation flatline in mutual silence, not turn-event AUROC). That
+proxy diagnostic is in [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md):
+criterion not met (0/57). It does not upgrade this ranking and is not a
+timing win by itself.
+
 ## Recommended next
 1. Gold or audited labels (do not treat CSV proxies or channel-energy
    VAD as final).
 2. Treat the DC n=12 VAD split as a small-n check, not a second primary.
 3. Publish CIs from the Spark JSON if a freeze is declared.
 4. Do **not** start Phase 2 from this ranking.
+5. Do **not** treat the silence/collapse null
+   ([PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md)) as a
+   timing-control result.

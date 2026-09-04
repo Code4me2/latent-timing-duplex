@@ -13,7 +13,9 @@ windows; full-length Moshi gaps are descriptive / length-confounded only).
 Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy
 VAD addendum, H=12 λ=0.01, mid-180):
 [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md). That note is not a freeze
-and is not Phase 2. VAD ≠ gold.
+and is not Phase 2. VAD ≠ gold. Silence/collapse diagnostic (57 mid-180
+sessions, channel-energy masks; criterion **not met**, 0/57; not a
+timing win): [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md).
 
 ## Goal
 
@@ -210,7 +212,9 @@ Phase 1 *science* (later, on Spark) is done when:
    predictive, or not predictive relative to those frozen baselines.
    A null is still a result. Interim: [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md)
    (weakly predictive on a CANDOR transcript proxy; evening-PT addendum
-   is a channel-energy VAD pool, not gold, not Phase 2).
+   is a channel-energy VAD pool, not gold, not Phase 2). Silence/collapse
+   (different question): [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md)
+   — criterion not met (0/57); not a timing win by itself.
 5. Moshi and BayLing weights were never trained.
 
 ## Out of scope (do not do in Phase 1)
