@@ -15,8 +15,9 @@ transcripts all leak into the labels. Report them as such.
 
 from __future__ import annotations
 
+import csv
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -25,9 +26,27 @@ from latent_timing_duplex.types import TURN_EVENT_KINDS, DualChannelSession, Tur
 DEFAULT_BACKCHANNEL_MAX_S = 0.6
 DEFAULT_BACKCHANNEL_GAP_S = 0.25
 TURN_KEYS = ("turns", "utterances", "segments", "items")
-SPEAKER_KEYS = ("speaker", "spk", "role", "channel", "name")
-START_KEYS = ("start", "start_s", "t_start", "startTime", "begin", "onset")
-END_KEYS = ("end", "end_s", "t_end", "endTime", "stop", "offset")
+SPEAKER_KEYS = ("speaker", "speakerId", "speaker_id", "spk", "role", "channel", "name")
+START_KEYS = (
+    "start",
+    "start_s",
+    "t_start",
+    "startTime",
+    "start_time",
+    "begin",
+    "onset",
+)
+END_KEYS = (
+    "end",
+    "end_s",
+    "t_end",
+    "endTime",
+    "end_time",
+    "stopTime",
+    "stop_time",
+    "stop",
+    "offset",
+)
 KIND_ALIASES: dict[str, TurnEventKind] = {
     "turn_shift": "turn_shift",
     "turn-shift": "turn_shift",
@@ -514,4 +533,138 @@ def describe_label_limitations() -> list[str]:
         "turn_shift = other-speaker onset after the previous speaker has ended; "
         "conversation-initial onsets are not counted.",
         "Prefer --labels gold JSONL when annotations exist; proxies are a fallback.",
+        "CANDOR extract*/transcription/*.csv and DuplexChat-style CSVs are "
+        "speaker-change proxies; required columns are speaker + start/end "
+        "(aliases: startTime/stopTime, start_s/end_s). Times > 1e4 are treated "
+        "as milliseconds.",
     ]
+
+
+@dataclass
+class TranscriptDirSource:
+    """Load CANDOR / DuplexChat transcription CSVs (or JSON) from a directory.
+
+    Session id = filename stem with optional ``candor_`` / ``dc_`` stripped.
+    Typical Spark tree: ``extract*/transcription/*.csv``.
+    """
+
+    path: Path
+    _turns: dict[str, list[TranscriptTurn]] = field(default_factory=dict)
+    backchannel_max_s: float = DEFAULT_BACKCHANNEL_MAX_S
+    backchannel_gap_s: float = DEFAULT_BACKCHANNEL_GAP_S
+
+    @classmethod
+    def from_dir(
+        cls,
+        path: str | Path,
+        *,
+        backchannel_max_s: float = DEFAULT_BACKCHANNEL_MAX_S,
+        backchannel_gap_s: float = DEFAULT_BACKCHANNEL_GAP_S,
+        glob: str = "**/*",
+    ) -> TranscriptDirSource:
+        root = Path(path)
+        if not root.is_dir():
+            raise FileNotFoundError(
+                f"transcripts dir {path!r} is missing. On Spark this is often "
+                "a CANDOR extract*/transcription/ tree of CSVs."
+            )
+        turns = load_transcript_dir(root, glob=glob)
+        return cls(
+            path=root,
+            _turns=turns,
+            backchannel_max_s=backchannel_max_s,
+            backchannel_gap_s=backchannel_gap_s,
+        )
+
+    def events_for(self, session_id: str) -> list[TurnEvent]:
+        turns = _lookup_fuzzy(self._turns, session_id)
+        return events_from_turns(
+            turns,
+            backchannel_max_s=self.backchannel_max_s,
+            backchannel_gap_s=self.backchannel_gap_s,
+        )
+
+
+def load_transcript_csv(path: str | Path, session_id: str | None = None) -> list[TranscriptTurn]:
+    """Parse one CANDOR-style transcription CSV into turns."""
+    root = Path(path)
+    text = root.read_text(encoding="utf-8-sig")
+    if not text.strip():
+        return []
+    reader = csv.DictReader(text.splitlines())
+    if reader.fieldnames is None:
+        raise ValueError(
+            f"{root} has no header. Need speaker + start/end columns "
+            "(startTime/stopTime or start/end)."
+        )
+    rows: list[TranscriptTurn] = []
+    for rec in reader:
+        parsed = _parse_turn({(k or "").strip(): v for k, v in rec.items() if k})
+        if parsed is not None:
+            rows.append(parsed)
+    rows = _maybe_ms_to_seconds(rows)
+    rows.sort(key=lambda t: (t.start, t.end))
+    del session_id
+    return rows
+
+
+def load_transcript_dir(
+    path: str | Path,
+    glob: str = "**/*",
+) -> dict[str, list[TranscriptTurn]]:
+    """Index transcripts under ``path`` by stripped session id."""
+    from latent_timing_duplex.phase1.artifacts import (
+        TRANSCRIPT_SUFFIXES,
+        session_id_from_filename,
+    )
+
+    root = Path(path)
+    index: dict[str, list[TranscriptTurn]] = {}
+    for child in sorted(root.glob(glob)):
+        if not child.is_file() or child.suffix.lower() not in TRANSCRIPT_SUFFIXES:
+            continue
+        sid = session_id_from_filename(child)
+        if child.suffix.lower() == ".csv":
+            turns = load_transcript_csv(child, session_id=sid)
+        else:
+            extra = _load_turn_index(child)
+            turns = []
+            for rows in extra.values():
+                turns.extend(rows)
+            if sid not in extra and extra:
+                # file used its own session_id; keep those keys too
+                for key, rows in extra.items():
+                    index.setdefault(key, []).extend(rows)
+                    index.setdefault(normalize_session_id(key), index[key])
+                continue
+        if not turns:
+            continue
+        index.setdefault(sid, []).extend(turns)
+        index.setdefault(normalize_session_id(sid), index[sid])
+    return index
+
+
+def _maybe_ms_to_seconds(turns: list[TranscriptTurn]) -> list[TranscriptTurn]:
+    if not turns:
+        return turns
+    max_t = max(max(t.start, t.end) for t in turns)
+    if max_t < 10_000:
+        return turns
+    return [
+        TranscriptTurn(
+            speaker=t.speaker,
+            start=t.start / 1000.0,
+            end=t.end / 1000.0,
+            text=t.text,
+        )
+        for t in turns
+    ]
+
+
+def _lookup_fuzzy(index: dict[str, Any], session_id: str) -> Any:
+    from latent_timing_duplex.phase1.artifacts import session_id_aliases
+
+    for key in session_id_aliases(session_id):
+        if key in index:
+            return index[key]
+    raise KeyError(f"no entry for session {session_id!r}")

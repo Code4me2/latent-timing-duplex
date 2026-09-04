@@ -54,6 +54,21 @@ def build_parser() -> argparse.ArgumentParser:
             "Turn-event compare: surprise vs Moshi NLL vs VAP on mid-180 "
             "windows. Paths are caller-supplied; --synthetic needs no files."
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Spark-61dd artifact layout (nothing opened unless passed):\n"
+            "  /home/velvet/cs199-phase1-work/ablations/\n"
+            "    SELECTION_LOCKED.json   # horizons.H_set or H_set: [1,12,62]\n"
+            "    h12_lam0.01/checkpoint.pt   # mlp_state_dict / net.0.weight\n"
+            "  hidden/moshi/<slice>/candor_<uuid>.pt  or  dc_<uuid>.pt\n"
+            "  targets/user_chunk/<slice>/candor_<uuid>.pt\n"
+            "  CANDOR extract*/transcription/*.csv   →  --transcripts-dir\n"
+            "Phase 0 JSONLs that only have audio_nll / p_shift_mean /\n"
+            "duration_sec are aggregate-only. RQ2 needs per-step series:\n"
+            "  ltd phase1-export-series --print-schema\n"
+            "Surprise-only dry run (not RQ2): add --surprise-only and omit\n"
+            "the NLL/VAP JSONLs. Do not invent per-step series from means.\n"
+        ),
     )
     phase1_eval.add_argument(
         "--synthetic",
@@ -71,8 +86,27 @@ def build_parser() -> argparse.ArgumentParser:
     phase1_eval.add_argument("--nll-jsonl", type=str, default=None)
     phase1_eval.add_argument("--vap-jsonl", type=str, default=None)
     phase1_eval.add_argument("--labels", type=str, default=None)
-    phase1_eval.add_argument("--transcripts", type=str, default=None)
+    phase1_eval.add_argument(
+        "--transcripts",
+        type=str,
+        default=None,
+        help="JSON/JSONL turns, or a directory of CANDOR-style CSVs",
+    )
+    phase1_eval.add_argument(
+        "--transcripts-dir",
+        type=str,
+        default=None,
+        help="Directory of CANDOR extract*/transcription/*.csv (proxies)",
+    )
     phase1_eval.add_argument("--vad", type=str, default=None)
+    phase1_eval.add_argument(
+        "--surprise-only",
+        action="store_true",
+        help=(
+            "Score jepa:surprise without NLL/VAP (dry run). Primary RQ2 "
+            "requires per-step --nll-jsonl and --vap-jsonl."
+        ),
+    )
     phase1_eval.add_argument("--session-id", action="append", default=None)
     phase1_eval.add_argument(
         "--horizon-frames",
@@ -113,6 +147,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Session-level Efron bootstrap B (protocol default 10000).",
     )
     phase1_eval.add_argument("--output", type=str, default=None)
+    export = sub.add_parser(
+        "phase1-export-series",
+        help=(
+            "Print or write per-step Moshi NLL / VAP JSONL schema. "
+            "Does not invent series from Phase 0 aggregates."
+        ),
+    )
+    export.add_argument(
+        "--print-schema",
+        action="store_true",
+        help="Print required per-step fields and the Spark Python snippet",
+    )
     return parser
 
 
@@ -395,8 +441,10 @@ def cmd_phase1_eval(args: argparse.Namespace) -> int:
         vap_jsonl=_p(args.vap_jsonl),
         labels=_p(args.labels),
         transcripts=_p(args.transcripts),
+        transcripts_dir=_p(getattr(args, "transcripts_dir", None)),
         vad=_p(args.vad),
         output=_p(args.output),
+        surprise_only=bool(getattr(args, "surprise_only", False)),
     )
     cfg = EvalConfig(
         window_s=float(args.window_s),
@@ -407,6 +455,7 @@ def cmd_phase1_eval(args: argparse.Namespace) -> int:
         horizon_frames=int(args.horizon_frames),
         lambda_reg=float(args.lambda_reg),
         lambda_role=str(args.lambda_role),
+        surprise_only=bool(getattr(args, "surprise_only", False)),
     )
     try:
         report = run_turn_event_eval(
@@ -421,12 +470,14 @@ def cmd_phase1_eval(args: argparse.Namespace) -> int:
             "  --ablations-root /home/velvet/cs199-phase1-work/ablations\n"
             "      (h1_lam0.01/, h12_lam0.01/, h62_lam0.01/ + optional "
             "SELECTION_LOCKED.json)\n"
-            "  --hidden-dir and --target-dir  (mid-180 [T,D] npz)  OR "
-            "--surprise-jsonl\n"
-            "  --nll-jsonl   Phase 0 Moshi user-channel per-step NLL\n"
-            "  --vap-jsonl   Phase 0 VAP p_shift / p_now\n"
-            "  --labels      gold events  OR  --transcripts / --vad proxies\n"
-            "See docs/EVAL_PROTOCOL_PHASE1.md.",
+            "  --hidden-dir and --target-dir  (candor_<uuid>.pt / dc_<uuid>.pt "
+            "or .npz)  OR --surprise-jsonl\n"
+            "  --nll-jsonl   per-step Moshi NLL (not audio_nll aggregates)\n"
+            "  --vap-jsonl   per-step VAP (not p_shift_mean aggregates)\n"
+            "  --labels | --transcripts-dir   gold JSONL or CANDOR CSVs\n"
+            "  --surprise-only   omit NLL/VAP (dry run only)\n"
+            "See docs/EVAL_PROTOCOL_PHASE1.md. "
+            "ltd phase1-export-series --print-schema",
             file=sys.stderr,
         )
         return 2
@@ -441,10 +492,24 @@ def cmd_phase1_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_phase1_export_series(args: argparse.Namespace) -> int:
+    from latent_timing_duplex.phase1.export_series import schema_text
+
+    print(schema_text())
+    if not args.print_schema:
+        print(
+            "This command does not run Moshi/VAP without local weights. "
+            "Use --print-schema (always printed) and the Python snippet on Spark."
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw[:2] == ["phase1", "eval"]:
         raw = ["phase1-eval", *raw[2:]]
+    if raw[:2] == ["phase1", "export-series"]:
+        raw = ["phase1-export-series", *raw[2:]]
     parser = build_parser()
     args = parser.parse_args(raw)
     if args.command == "status":
@@ -464,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "phase1-eval":
         return cmd_phase1_eval(args)
+    if args.command == "phase1-export-series":
+        return cmd_phase1_export_series(args)
     parser.error(f"unknown command {args.command}")
     return 2
 

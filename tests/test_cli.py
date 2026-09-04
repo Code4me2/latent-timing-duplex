@@ -70,3 +70,27 @@ def test_phase1_eval_missing_paths(capsys) -> None:
     err = capsys.readouterr().err
     assert "missing Spark input" in err
     assert "--nll-jsonl" in err
+
+
+def test_phase1_eval_help(capsys) -> None:
+    raised = False
+    try:
+        main(["phase1-eval", "--help"])
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 0
+    assert raised
+    out = capsys.readouterr().out
+    assert "mlp_state_dict" in out
+    assert "candor_" in out
+    assert "duration_sec" in out
+    assert "surprise-only" in out
+    assert "extract*/transcription" in out or "transcription" in out
+
+
+def test_phase1_export_series_schema(capsys) -> None:
+    assert main(["phase1-export-series", "--print-schema"]) == 0
+    out = capsys.readouterr().out
+    assert "audio_nll_per_step" in out
+    assert "p_shift_per_step" in out
+    assert "FrozenNLLExtractor" in out

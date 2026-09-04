@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from latent_timing_duplex.phase1.horizons import CHUNK_DURATION_S
+from latent_timing_duplex.exceptions import Phase1EvalInputMissing
 from latent_timing_duplex.phase1.series import (
     crop_values_to_window,
     intersect_by_frame,
@@ -91,3 +92,55 @@ def test_intersect_by_frame_trims_to_shared_t_end() -> None:
     assert len(aligned["nll:moshi"]) == 8
     assert len(aligned["jepa:surprise"]) == 8
     assert aligned["nll:moshi"][-1].t_end == pytest.approx(0.64)
+
+
+def test_duration_sec_alias_with_per_step(tmp_path) -> None:
+    path = tmp_path / "nll.jsonl"
+    values = np.linspace(0.1, 0.5, 20).tolist()
+    path.write_text(
+        json.dumps(
+            {
+                "uuid": "u1",
+                "audio_nll_per_step": values,
+                "duration_sec": 1.6,
+                "window": "mid180",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    series = load_nll_jsonl(path).get("u1")
+    assert series.values.shape == (20,)
+
+
+def test_aggregate_only_nll_raises_clear_error(tmp_path) -> None:
+    path = tmp_path / "agg.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "session_id": "u1",
+                "audio_nll": 0.55,
+                "p_shift_mean": 0.48,
+                "duration_sec": 180.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase1EvalInputMissing, match="per-step") as exc:
+        load_nll_jsonl(path)
+    msg = str(exc.value)
+    assert "audio_nll_per_step" in msg
+    assert "surprise-only" in msg
+    assert "AUROC cannot be computed from clip-level means" in msg
+
+
+def test_aggregate_only_vap_raises(tmp_path) -> None:
+    path = tmp_path / "vap_agg.jsonl"
+    path.write_text(
+        json.dumps({"session_id": "u1", "p_shift_mean": 0.5, "duration_sec": 180.0})
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(Phase1EvalInputMissing, match="p_shift_per_step"):
+        load_vap_jsonl(path)

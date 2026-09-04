@@ -40,9 +40,15 @@ from latent_timing_duplex.phase1.horizons import (
     REFERENCE_LAMBDA,
     SPARK_TRAINED_HORIZON_FRAMES,
 )
+from latent_timing_duplex.phase1.artifacts import (
+    ARRAY_SUFFIXES,
+    list_session_ids_in_dir,
+    resolve_named_file,
+)
 from latent_timing_duplex.phase1.labels import (
     CompositeEventSource,
     JsonlEventSource,
+    TranscriptDirSource,
     TranscriptProxySource,
     TurnEventSource,
     VadProxySource,
@@ -170,6 +176,7 @@ class EvalConfig:
     lambda_reg: float = PRIMARY_LAMBDA
     lambda_role: str = "primary"
     surprise_kind: str = "mse"
+    surprise_only: bool = False
 
 
 @dataclass
@@ -188,8 +195,10 @@ class EvalPaths:
     vap_jsonl: Path | None = None
     labels: Path | None = None
     transcripts: Path | None = None
+    transcripts_dir: Path | None = None
     vad: Path | None = None
     output: Path | None = None
+    surprise_only: bool = False
 
 
 def score_aligned_signals(
@@ -288,13 +297,19 @@ def build_label_source(paths: EvalPaths) -> TurnEventSource:
     if paths.labels is not None:
         sources.append(JsonlEventSource.from_path(paths.labels))
     if paths.transcripts is not None:
-        sources.append(TranscriptProxySource.from_path(paths.transcripts))
+        if paths.transcripts.is_dir():
+            sources.append(TranscriptDirSource.from_dir(paths.transcripts))
+        else:
+            sources.append(TranscriptProxySource.from_path(paths.transcripts))
+    if paths.transcripts_dir is not None:
+        sources.append(TranscriptDirSource.from_dir(paths.transcripts_dir))
     if paths.vad is not None:
         sources.append(VadProxySource.from_path(paths.vad))
     if not sources:
         raise Phase1EvalInputMissing(
             "no turn-event labels. Pass --labels (gold JSONL), or "
-            "--transcripts / --vad for speaker-change / onset proxies. "
+            "--transcripts / --transcripts-dir (CANDOR extract*/transcription "
+            "CSVs) / --vad for speaker-change / onset proxies. "
             "See docs/EVAL_PROTOCOL_PHASE1.md."
         )
     return sources[0] if len(sources) == 1 else CompositeEventSource(sources)
@@ -456,7 +471,21 @@ def run_turn_event_eval(
         if paths.vap_jsonl is not None
         else None
     )
-    labels = build_label_source(paths) if (paths.labels or paths.transcripts or paths.vad) else None
+    if not cfg.surprise_only and not paths.surprise_only:
+        if paths.nll_jsonl is None or paths.vap_jsonl is None:
+            raise Phase1EvalInputMissing(
+                "primary RQ2 compare needs per-step --nll-jsonl and --vap-jsonl. "
+                "Phase 0 aggregate JSONLs (audio_nll / p_shift_mean / "
+                "duration_sec) are not enough — do not invent a series from "
+                "clip means. Pass --surprise-only for a surprise-only dry run, "
+                "or regenerate per-step files with "
+                "`ltd phase1-export-series --print-schema`."
+            )
+    labels = (
+        build_label_source(paths)
+        if (paths.labels or paths.transcripts or paths.transcripts_dir or paths.vad)
+        else None
+    )
 
     if sessions is None:
         ids = list(session_ids or [])
@@ -469,8 +498,8 @@ def run_turn_event_eval(
             )
         if labels is None:
             raise Phase1EvalInputMissing(
-                "real sessions need --labels or --transcripts/--vad. "
-                "Use --synthetic for the CPU demo."
+                "real sessions need --labels or --transcripts / "
+                "--transcripts-dir / --vad. Use --synthetic for the CPU demo."
             )
         built: list[DualChannelSession] = []
         for sid in ids:
@@ -531,7 +560,13 @@ def run_turn_event_eval(
     if vap_index is None:
         missing_baselines.append("vap:p_shift (--vap-jsonl)")
     if missing_baselines:
-        notes.append("missing baselines (scored without them): " + ", ".join(missing_baselines))
+        if cfg.surprise_only or paths.surprise_only:
+            notes.append(
+                "surprise-only dry run; not the primary RQ2 comparison. missing: "
+                + ", ".join(missing_baselines)
+            )
+        else:
+            notes.append("missing baselines (scored without them): " + ", ".join(missing_baselines))
 
     report = CompareReport(
         seed=cfg.seed,
@@ -650,10 +685,15 @@ def _infer_session_ids(
         if index is not None:
             ids.extend(index.session_ids())
     if paths.hidden_dir is not None and paths.hidden_dir.is_dir():
-        for child in sorted(paths.hidden_dir.glob("*.npz")):
-            ids.append(child.stem)
-        for child in sorted(paths.hidden_dir.glob("*.npy")):
-            ids.append(child.stem)
+        ids.extend(list_session_ids_in_dir(paths.hidden_dir, ARRAY_SUFFIXES))
+    if paths.transcripts_dir is not None and paths.transcripts_dir.is_dir():
+        from latent_timing_duplex.phase1.artifacts import TRANSCRIPT_SUFFIXES
+
+        ids.extend(list_session_ids_in_dir(paths.transcripts_dir, TRANSCRIPT_SUFFIXES))
+    if paths.transcripts is not None and paths.transcripts.is_dir():
+        from latent_timing_duplex.phase1.artifacts import TRANSCRIPT_SUFFIXES
+
+        ids.extend(list_session_ids_in_dir(paths.transcripts, TRANSCRIPT_SUFFIXES))
     # unique, stable
     seen: set[str] = set()
     out: list[str] = []
@@ -674,15 +714,12 @@ def _resolve_array(session_id: str, single: Path | None, directory: Path | None)
         raise Phase1EvalInputMissing(
             f"need --hidden/--target or --hidden-dir/--target-dir for {session_id}"
         )
-    for suffix in (".npz", ".npy"):
-        candidate = directory / f"{session_id}{suffix}"
-        if candidate.is_file():
-            return candidate
-        candidate = directory / f"{normalize_session_id(session_id)}{suffix}"
-        if candidate.is_file():
-            return candidate
+    found = resolve_named_file(directory, session_id, ARRAY_SUFFIXES)
+    if found is not None:
+        return found
     raise Phase1EvalInputMissing(
-        f"no hidden/target array for {session_id} under {directory}"
+        f"no hidden/target array for {session_id} under {directory} "
+        f"(looked for {{session_id, candor_<id>, dc_<id>}}.{{npz,npy,pt,pth}})"
     )
 
 
@@ -695,11 +732,43 @@ def _load_matrix(path: Path, keys: tuple[str, ...]) -> np.ndarray:
                 break
         else:
             raise KeyError(f"{path} has none of {keys}")
+    elif path.suffix in {".pt", ".pth"}:
+        arr = _load_torch_matrix(path, keys)
     else:
         arr = np.asarray(np.load(path), dtype=np.float64)
     if arr.ndim != 2:
         raise ValueError(f"{path} must be [T, D], got {arr.shape}")
     return arr
+
+
+def _load_torch_matrix(path: Path, keys: tuple[str, ...]) -> np.ndarray:
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError(
+            f"torch is required to read {path} (Spark hidden/target .pt). "
+            "Convert to .npz or install torch."
+        ) from exc
+    blob = torch.load(path, map_location="cpu", weights_only=False)
+    if hasattr(blob, "detach"):
+        return np.asarray(blob.detach().float().cpu().numpy(), dtype=np.float64)
+    if isinstance(blob, dict):
+        for key in keys + ("data", "tensor", "arr", "x", "z"):
+            if key in blob:
+                value = blob[key]
+                if hasattr(value, "detach"):
+                    return np.asarray(value.detach().float().cpu().numpy(), dtype=np.float64)
+                arr = np.asarray(value, dtype=np.float64)
+                if arr.ndim == 2:
+                    return arr
+        for value in blob.values():
+            if hasattr(value, "detach"):
+                arr = np.asarray(value.detach().float().cpu().numpy(), dtype=np.float64)
+                if arr.ndim == 2:
+                    return arr
+            elif isinstance(value, np.ndarray) and value.ndim == 2:
+                return np.asarray(value, dtype=np.float64)
+    raise ValueError(f"{path} has no 2-D hidden/target tensor (keys={list(blob) if isinstance(blob, dict) else type(blob)})")
 
 
 def _or_nan(value: float | None) -> float:

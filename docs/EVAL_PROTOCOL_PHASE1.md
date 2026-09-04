@@ -180,6 +180,63 @@ Per session × signal × event kind × eval horizon:
 
 Across sessions: unweighted mean + Efron bootstrap CI (seed 20260903).
 
+## Spark artifact adapters (spark-61dd)
+
+Morpheus’s Phase 1 / Phase 0 trees do **not** match the first-cut CLI
+assumptions. The scorer now adapts these layouts. Absolute paths are still
+never opened unless passed.
+
+| Artifact | Spark layout | Adapter |
+|---|---|---|
+| Selection lock | `/home/velvet/cs199-phase1-work/ablations/SELECTION_LOCKED.json` with `{"horizons":{"H_set":[1,12,62]}}` or top-level `H_set` | `coerce_horizon_frames` accepts a list **or** a dict (`H_set` / `horizons` / `H`) |
+| Checkpoints | `h12_lam0.01/checkpoint.pt` with weights under `mlp_state_dict` (`net.0.weight`, …) | Recursive unwrap of `state_dict` / `mlp_state_dict` / `model_state_dict` / `predictor`. `.pt` / `.pth` / `.npz` |
+| Hidden / targets | `candor_<uuid>.pt`, `dc_<uuid>.pt` (torch `[T,D]`) | Stem match + strip `candor_` / `dc_`; also `.npz`/`.npy` |
+| Phase 0 NLL / VAP JSONL | **Aggregate-only today**: `audio_nll`, `p_shift_mean`, `duration_sec` | `duration_sec` ↔ `duration_s`. **No fake per-step series.** Missing per-step fields raise with the schema below. |
+| Labels | CANDOR `extract*/transcription/*.csv` (no gold JSONL yet) | `--transcripts-dir` (or `--transcripts` pointing at a directory). Proxies. |
+
+### Per-step series are the scientific blocker
+
+Clip-level `audio_nll` / `p_shift_mean` cannot yield AUROC against turn
+events. Do **not** broadcast a mean across T=2250. On Spark, re-emit
+per-step JSONLs from existing mid-180 audio with the Phase 0 extractors:
+
+```bash
+ltd phase1-export-series --print-schema
+```
+
+```python
+from latent_timing_duplex.phase1.export_series import (
+    nll_record_from_extractor,
+    vap_record_from_baseline,
+    write_jsonl,
+)
+from latent_timing_duplex.phase1.windows import crop_session
+from latent_timing_duplex.extract.nll import FrozenNLLExtractor, prepare_moshi_forward_env
+
+prepare_moshi_forward_env()  # NO_CUDA_GRAPH=1 NO_TORCH_COMPILE=1
+cropped = crop_session(session, window_s=180.0, mode="mid")
+write_jsonl(nll_out, [nll_record_from_extractor(cropped, nll_ext, crop=False)])
+write_jsonl(vap_out, [vap_record_from_baseline(cropped, vap, crop=False)])
+```
+
+Required per-step fields: `audio_nll_per_step` (or a list-valued `nll` /
+`values`); `p_shift_per_step` or a list-valued `p_shift` / `p_now`.
+`--surprise-only` skips baselines for a dry run and is **not** the RQ2 table.
+
+### CANDOR transcription CSV columns (proxies)
+
+Header required. First match wins:
+
+| Role | Aliases |
+|---|---|
+| speaker | `speaker`, `speakerId`, `spk`, `role` |
+| start (s) | `start`, `startTime`, `start_s` |
+| end (s) | `end`, `stopTime`, `endTime`, `stop` |
+| text | `text`, `utterance` (optional) |
+
+Filename stem is the session id (`candor_` / `dc_` stripped). Values `> 1e4`
+are treated as milliseconds. These are **not** official CANDOR turn labels.
+
 ## Out of scope
 
 - Phase 2 policy fine-tune / unfreezing Moshi or BayLing

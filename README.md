@@ -133,11 +133,11 @@ This repo **replaces** the ad-hoc `MISSING_HARNESS.md` gap. The scorer and flags
 | Flag | Typical spark-61dd location | What it is |
 |---|---|---|
 | `--ablations-root` | `/home/velvet/cs199-phase1-work/ablations` | `h{1,12,62}_lam{0,0.01}/` + optional `SELECTION_LOCKED.json` |
-| `--hidden-dir` / `--target-dir` | `.../hidden/moshi/<slice>/`, `.../targets/user_chunk/<slice>/` | mid-180 `[T=2250, D=4096]` / `[T, E]` `.npz` |
+| `--hidden-dir` / `--target-dir` | `.../hidden/moshi/<slice>/`, `.../targets/user_chunk/<slice>/` | mid-180 `[T=2250, D=4096]` as `candor_<uuid>.pt` / `dc_<uuid>.pt` or `.npz` |
 | *or* `--surprise-jsonl` | under `cs199-phase1-work/` | precomputed surprise series (skips the head) |
-| `--nll-jsonl` | Phase 0 `cs199-candor-work/` / `cs199-duplexchat-work/` | Moshi user-channel per-step NLL |
-| `--vap-jsonl` | Phase 0 VAP JSONL | `p_shift` or `p_now` (inverted if LEFT=user) |
-| `--labels` *or* `--transcripts` / `--vad` | annotations or reconstruct/VAD exports | gold events, else speaker-change / onset proxies |
+| `--nll-jsonl` | Phase 0 work trees | **per-step** Moshi NLL (`audio_nll_per_step`). Aggregates (`audio_nll`, `duration_sec`) are rejected |
+| `--vap-jsonl` | Phase 0 VAP JSONL | **per-step** `p_shift` / `p_now`. `p_shift_mean` is rejected |
+| `--labels` *or* `--transcripts-dir` / `--vad` | gold JSONL, or CANDOR `extract*/transcription/*.csv` | gold events, else speaker-change / onset proxies |
 
 Primary: `--horizon-frames 12 --lambda-reg 0.01 --window-mode mid --window-s 180 --seed 20260903 --bootstrap 10000`. Repeat H∈{1,62} and λ=0. Alias: `ltd phase1 eval …`. Do not claim wins from the table.
 

@@ -9,8 +9,10 @@ import pytest
 
 from latent_timing_duplex.exceptions import Phase1EvalInputMissing
 from latent_timing_duplex.phase1.checkpoint import (
+    coerce_horizon_frames,
     format_run_dirname,
     load_mlp_checkpoint,
+    load_mlp_from_state_tree,
     load_selection_lock,
     parse_run_dirname,
     resolve_checkpoint_path,
@@ -87,3 +89,54 @@ def test_resolve_checkpoint_and_selection(tmp_path) -> None:
     assert found.name == "checkpoint.npz"
     with pytest.raises(Phase1EvalInputMissing):
         resolve_checkpoint_path(tmp_path, 62, 0.01, selection=sel)
+
+
+def test_coerce_horizon_frames_accepts_h_set_dict() -> None:
+    assert coerce_horizon_frames([1, 12, 62]) == (1, 12, 62)
+    assert coerce_horizon_frames({"H_set": [1, 12, 62]}) == (1, 12, 62)
+    assert coerce_horizon_frames({"horizons": {"H_set": [1, 12, 62]}}) == (1, 12, 62)
+    assert coerce_horizon_frames({"H": [1, 12, 62]}) == (1, 12, 62)
+    assert coerce_horizon_frames(None) == (1, 12, 62)
+
+
+def test_selection_lock_spark_h_set_shape(tmp_path) -> None:
+    """Exact Spark shape that used to raise int('H_set')."""
+    lock = {
+        "seed": 20260903,
+        "horizons": {"H_set": [1, 12, 62], "notes": "floor grid"},
+        "primary_lambda": 0.01,
+        "reference_lambda": 0.0,
+        "window": "mid180",
+    }
+    path = tmp_path / "SELECTION_LOCKED.json"
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    sel = load_selection_lock(path)
+    assert sel.horizon_frames == (1, 12, 62)
+    sel_dir = load_selection_lock(tmp_path)
+    assert sel_dir.horizon_frames == (1, 12, 62)
+
+
+def test_nested_mlp_state_dict_without_torch() -> None:
+    rng = np.random.default_rng(6)
+    # torch layout [out, in] under mlp_state_dict / net.*.weight
+    w0 = rng.normal(size=(6, 8))
+    w1 = rng.normal(size=(4, 6))
+    tree = {
+        "mlp_state_dict": {
+            "net.0.weight": w0,
+            "net.0.bias": np.zeros(6),
+            "net.2.weight": w1,
+            "net.2.bias": np.zeros(4),
+        },
+        "horizon_frames": 12,
+        "lambda_reg": 0.01,
+    }
+    loaded = load_mlp_from_state_tree(tree)
+    assert loaded.horizon_frames == 12
+    assert loaded.lambda_reg == pytest.approx(0.01)
+    hidden = rng.normal(size=(5, 8))
+    out = loaded.head.forward(hidden)
+    assert out.shape == (5, 4)
+    # Reconstruct expected torch Linear: x @ W.T + b
+    want = np.maximum(hidden @ w0.T, 0.0) @ w1.T
+    assert np.allclose(out, want)

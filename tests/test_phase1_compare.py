@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from latent_timing_duplex.phase1.checkpoint import save_mlp_checkpoint
 from latent_timing_duplex.phase1.compare import (
@@ -167,6 +168,17 @@ def test_run_turn_event_eval_from_checkpoint_and_jsonl(tmp_path) -> None:
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["claim"].startswith("Code + metrics only")
     assert payload["protocol"] == "EVAL_PROTOCOL_PHASE1"
+
+
+def test_rq2_requires_per_step_jsonls(tmp_path) -> None:
+    from latent_timing_duplex.exceptions import Phase1EvalInputMissing
+
+    with pytest.raises(Phase1EvalInputMissing, match="per-step"):
+        run_turn_event_eval(
+            EvalPaths(hidden_dir=tmp_path, labels=tmp_path / "missing.jsonl"),
+            EvalConfig(surprise_only=False, bootstrap_b=8),
+            session_ids=["x"],
+        )
 
 
 def test_synthetic_compare_cli_table() -> None:

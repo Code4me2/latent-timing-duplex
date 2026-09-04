@@ -16,6 +16,7 @@ from typing import Any, Iterable
 import numpy as np
 
 from latent_timing_duplex.baselines.vap import pool_to_chunk_grid
+from latent_timing_duplex.exceptions import Phase1EvalInputMissing
 from latent_timing_duplex.phase1.horizons import CHUNK_DURATION_S, MID180_N_FRAMES
 from latent_timing_duplex.phase1.labels import normalize_session_id
 from latent_timing_duplex.phase1.windows import WindowMode, window_bounds
@@ -29,19 +30,62 @@ SESSION_ID_KEYS = (
     "episode_id",
     "id",
 )
-NLL_VALUE_KEYS = (
+# Per-step only. Scalars such as ``audio_nll`` / ``p_shift_mean`` are aggregates
+# and must not be expanded into a fake 1-frame series.
+NLL_STEP_KEYS = (
     "audio_nll_per_step",
     "audio_per_step",
+    "nll_audio_per_step",
+    "user_nll_per_step",
+    "user_channel_nll",
+    "nll_per_step",
+    "values",
+)
+NLL_MAYBE_SERIES_KEYS = (
     "nll_audio",
     "audio_nll",
     "user_nll",
-    "user_channel_nll",
     "nll",
-    "values",
 )
-VAP_SHIFT_KEYS = ("p_shift", "p(shift)", "vap_p_shift", "p_shift_per_step")
-VAP_NOW_KEYS = ("p_now", "p_now_per_step", "vap_p_now")
-VAP_FUTURE_KEYS = ("p_future", "p_future_per_step", "vap_p_future")
+NLL_AGGREGATE_KEYS = (
+    "audio_nll",
+    "nll_audio",
+    "nll",
+    "audio_nll_mean",
+    "duration_weighted_nll",
+    "audio_nll_dw",
+)
+VAP_STEP_KEYS = (
+    "p_shift_per_step",
+    "p_now_per_step",
+    "p_future_per_step",
+    "vap_p_shift_per_step",
+)
+VAP_MAYBE_SERIES_KEYS = (
+    "p_shift",
+    "p(shift)",
+    "vap_p_shift",
+    "p_now",
+    "vap_p_now",
+    "p_future",
+    "vap_p_future",
+)
+VAP_AGGREGATE_KEYS = (
+    "p_shift_mean",
+    "p_now_mean",
+    "p_future_mean",
+    "p_shift_dw",
+    "p_now_dw",
+    "vap_p_shift",
+    "p_shift",
+    "p_now",
+)
+VAP_SHIFT_KEYS = ("p_shift_per_step", "p_shift", "p(shift)", "vap_p_shift")
+VAP_NOW_KEYS = ("p_now_per_step", "p_now", "vap_p_now")
+VAP_FUTURE_KEYS = ("p_future_per_step", "p_future", "vap_p_future")
+MIN_SERIES_LEN = 2
+# Keep old name so existing imports do not break; it is step-preferring now.
+NLL_VALUE_KEYS = NLL_STEP_KEYS + NLL_MAYBE_SERIES_KEYS
 SURPRISE_VALUE_KEYS = (
     "surprise",
     "jepa_surprise",
@@ -50,7 +94,13 @@ SURPRISE_VALUE_KEYS = (
     "prediction_error",
 )
 T_END_KEYS = ("t_end", "t_ends", "t_end_s")
-DURATION_KEYS = ("duration_s", "duration", "clip_duration_s", "length_s")
+DURATION_KEYS = (
+    "duration_s",
+    "duration_sec",
+    "duration",
+    "clip_duration_s",
+    "length_s",
+)
 
 
 @dataclass
@@ -149,6 +199,65 @@ def _first_array(record: dict[str, Any], keys: tuple[str, ...]) -> np.ndarray | 
     return None
 
 
+def _as_step_series(
+    record: dict[str, Any],
+    step_keys: tuple[str, ...],
+    maybe_keys: tuple[str, ...],
+) -> np.ndarray | None:
+    """Return a per-step vector, or None if the record is aggregate-only.
+
+    A scalar or length-1 array is treated as an aggregate (``audio_nll``,
+    ``p_shift_mean``). We never broadcast that into a fake T-length series.
+    """
+    for key in step_keys + maybe_keys:
+        if key not in record or record[key] is None:
+            continue
+        arr = np.asarray(record[key], dtype=np.float64).reshape(-1)
+        if arr.size >= MIN_SERIES_LEN:
+            return arr
+    return None
+
+
+def record_has_aggregate(record: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(k in record and record[k] is not None for k in keys)
+
+
+def per_step_schema_help(kind: str) -> str:
+    if kind == "nll":
+        return (
+            "Moshi NLL per-step JSONL schema (one object per session):\n"
+            "  session_id / uuid / conversation_id\n"
+            "  audio_nll_per_step: [float, ...]   # one value per 80 ms frame\n"
+            "  duration_s or duration_sec: float\n"
+            "  window: mid180 | first180 | full   # optional\n"
+            "Aggregates such as audio_nll / duration_sec alone are not enough.\n"
+            "Regenerate with: ltd phase1-export-series --print-schema\n"
+            "or FrozenNLLExtractor.extract(crop_session(session, 180, 'mid'))."
+        )
+    return (
+        "VAP per-step JSONL schema (one object per session):\n"
+        "  session_id / uuid\n"
+        "  p_shift_per_step or p_now_per_step: [float, ...]\n"
+        "    (p_shift list, or p_now list inverted as 1-p_now when LEFT=user)\n"
+        "    50 Hz series are pooled to 80 ms. Length-1 / p_shift_mean is aggregate.\n"
+        "  duration_s or duration_sec: float\n"
+        "Regenerate with: ltd phase1-export-series --print-schema\n"
+        "or VAPBaseline.score_session(crop_session(session, 180, 'mid'))."
+    )
+
+
+def aggregate_only_error(kind: str, path: str | Path, n_records: int) -> Phase1EvalInputMissing:
+    label = "Moshi NLL" if kind == "nll" else "VAP"
+    return Phase1EvalInputMissing(
+        f"{path} has {n_records} {label} record(s) but no per-step series "
+        f"(found aggregates such as audio_nll / p_shift_mean / duration_sec). "
+        f"AUROC cannot be computed from clip-level means. "
+        f"Omit --{kind}-jsonl and pass --surprise-only for a surprise-only "
+        f"dry run (not the primary RQ2 comparison), or re-emit per-step "
+        f"JSONLs.\n\n{per_step_schema_help(kind)}"
+    )
+
+
 def _duration_of(record: dict[str, Any], n_values: int, chunk_s: float) -> float:
     for key in DURATION_KEYS:
         if key in record and record[key] is not None:
@@ -242,10 +351,16 @@ def load_nll_jsonl(
 ) -> SeriesIndex:
     """Load Phase 0 Moshi user-channel NLL series (per-step audio NLL)."""
     index = SeriesIndex(name=name)
-    for rec in load_jsonl_records(path):
+    records = load_jsonl_records(path)
+    n_aggregate = 0
+    for rec in records:
         sid = session_id_of(rec)
-        raw = _first_array(rec, NLL_VALUE_KEYS)
-        if sid is None or raw is None:
+        raw = _as_step_series(rec, NLL_STEP_KEYS, NLL_MAYBE_SERIES_KEYS)
+        if raw is None:
+            if sid is not None or record_has_aggregate(rec, NLL_AGGREGATE_KEYS + DURATION_KEYS):
+                n_aggregate += 1
+            continue
+        if sid is None:
             continue
         duration = _duration_of(rec, raw.size, CHUNK_DURATION_S)
         values = raw
@@ -268,6 +383,8 @@ def load_nll_jsonl(
             t_end = None
         series = values_to_aligned(sid, name, values, t_end=t_end, notes=notes)
         _store(index, sid, series)
+    if not index.records:
+        raise aggregate_only_error("nll", path, n_aggregate or len(records))
     return index
 
 
@@ -282,12 +399,12 @@ def load_vap_jsonl(
     """Load Phase 0 VAP series. Prefers ``p_shift``; can invert ``p_now``."""
     name = "vap:p_shift" if prefer == "p_shift" else f"vap:{prefer}"
     index = SeriesIndex(name=name)
-    for rec in load_jsonl_records(path):
+    records = load_jsonl_records(path)
+    n_aggregate = 0
+    for rec in records:
         sid = session_id_of(rec)
-        if sid is None:
-            continue
-        shift = _first_array(rec, VAP_SHIFT_KEYS)
-        now = _first_array(rec, VAP_NOW_KEYS)
+        shift = _as_step_series(rec, ("p_shift_per_step",), ("p_shift", "p(shift)", "vap_p_shift"))
+        now = _as_step_series(rec, ("p_now_per_step",), ("p_now", "vap_p_now"))
         if prefer == "p_now":
             raw = now if now is not None else (1.0 - shift if shift is not None else None)
             name_i = "vap:p_now"
@@ -300,6 +417,10 @@ def load_vap_jsonl(
                 raw = None
             name_i = "vap:p_shift"
         if raw is None:
+            if sid is not None or record_has_aggregate(rec, VAP_AGGREGATE_KEYS + DURATION_KEYS):
+                n_aggregate += 1
+            continue
+        if sid is None:
             continue
         duration = _duration_of(rec, raw.size, CHUNK_DURATION_S)
         values = maybe_pool_50hz(raw, duration_s=duration)
@@ -320,6 +441,8 @@ def load_vap_jsonl(
                 notes = "vap-jsonl already-windowed"
         series = values_to_aligned(sid, name_i, values, notes=notes)
         _store(index, sid, series)
+    if not index.records:
+        raise aggregate_only_error("vap", path, n_aggregate or len(records))
     return index
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from latent_timing_duplex.phase1.labels import (
     JsonlEventSource,
     TranscriptProxySource,
@@ -97,3 +99,35 @@ def test_transcript_and_vad_sources(tmp_path) -> None:
     v_events = VadProxySource.from_path(vad).events_for("conv")
     assert [e.kind for e in t_events] == ["turn_shift"]
     assert [e.kind for e in v_events] == ["turn_shift"]
+
+
+def test_candor_transcription_csv_dir(tmp_path) -> None:
+    from latent_timing_duplex.phase1.labels import TranscriptDirSource
+
+    folder = tmp_path / "extract" / "transcription"
+    folder.mkdir(parents=True)
+    csv_path = folder / "candor_abc-uuid.csv"
+    csv_path.write_text(
+        "speaker,startTime,stopTime,utterance\n"
+        "user,0.0,1.0,hello\n"
+        "assistant,1.2,2.0,hi\n",
+        encoding="utf-8",
+    )
+    src = TranscriptDirSource.from_dir(tmp_path / "extract")
+    events = src.events_for("abc-uuid")
+    assert len(events) == 1
+    assert events[0].kind == "turn_shift"
+    assert events[0].speaker == "assistant"
+
+
+def test_csv_milliseconds_are_scaled(tmp_path) -> None:
+    from latent_timing_duplex.phase1.labels import load_transcript_csv
+
+    path = tmp_path / "dc_ep1.csv"
+    path.write_text(
+        "speaker,start,end\nuser,0,15000\nassistant,20000,35000\n",
+        encoding="utf-8",
+    )
+    turns = load_transcript_csv(path)
+    assert turns[0].end == pytest.approx(15.0)
+    assert turns[1].start == pytest.approx(20.0)

@@ -96,6 +96,48 @@ def default_selection() -> SelectionLock:
     return SelectionLock()
 
 
+def coerce_horizon_frames(raw: Any, *, _depth: int = 0) -> tuple[int, ...]:
+    """Accept a list of ints **or** a dict with ``H_set`` / ``horizons`` / ``H``.
+
+    Spark ``SELECTION_LOCKED.json`` uses ``{"horizons": {"H_set": [1, 12, 62]}}``
+    (or a top-level ``H_set``). Iterating that dict as ints raises
+    ``invalid literal for int() ... 'H_set'``.
+    """
+    if raw is None:
+        return SPARK_TRAINED_HORIZON_FRAMES
+    if _depth > 5:
+        raise ValueError(f"cannot parse horizon spec {raw!r}")
+    if isinstance(raw, dict):
+        for key in ("H_set", "horizon_frames", "horizons", "H", "frames", "values"):
+            if key in raw:
+                return coerce_horizon_frames(raw[key], _depth=_depth + 1)
+        for value in raw.values():
+            if isinstance(value, (list, tuple)) and value:
+                try:
+                    return tuple(int(x) for x in value)
+                except (TypeError, ValueError):
+                    continue
+        raise ValueError(
+            f"horizon spec is a dict without H_set / horizons / H: {sorted(raw)}"
+        )
+    if isinstance(raw, (list, tuple)):
+        if not raw:
+            return SPARK_TRAINED_HORIZON_FRAMES
+        if isinstance(raw[0], dict):
+            return coerce_horizon_frames(raw[0], _depth=_depth + 1)
+        try:
+            return tuple(int(x) for x in raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"horizon list must be ints (got {raw!r}). "
+                "Spark locks may nest H under H_set."
+            ) from exc
+    try:
+        return (int(raw),)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"cannot parse horizon spec {raw!r}") from exc
+
+
 def load_selection_lock(path: str | Path | None) -> SelectionLock:
     """Read ``SELECTION_LOCKED.json`` or return protocol defaults."""
     if path is None:
@@ -108,11 +150,16 @@ def load_selection_lock(path: str | Path | None) -> SelectionLock:
     data = json.loads(root.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{root} must be a JSON object")
-    horizons = data.get("horizon_frames") or data.get("H") or data.get("horizons")
-    if horizons is None:
-        horizon_frames = SPARK_TRAINED_HORIZON_FRAMES
-    else:
-        horizon_frames = tuple(int(x) for x in horizons)
+    raw_h = (
+        data.get("horizon_frames")
+        if data.get("horizon_frames") is not None
+        else data.get("H_set")
+        if data.get("H_set") is not None
+        else data.get("H")
+        if data.get("H") is not None
+        else data.get("horizons")
+    )
+    horizon_frames = coerce_horizon_frames(raw_h)
     window = data.get("window") or data.get("window_mode") or "mid"
     window_s = float(data.get("window_s") or data.get("W") or 180.0)
     if isinstance(window, str) and window.endswith("180"):
@@ -324,41 +371,131 @@ def _coerce_weight(w: np.ndarray, n_in: int, n_out: int) -> np.ndarray:
     raise ValueError(f"weight shape {arr.shape} is neither ({n_in}, {n_out}) nor torch ({n_out}, {n_in})")
 
 
-def _load_torch(path: Path, fallback: tuple[int, float] | None) -> LoadedCheckpoint:
-    try:
-        import torch
-    except ImportError as exc:
-        raise RuntimeError(
-            f"torch is required to read {path}. Convert the Spark checkpoint "
-            "to checkpoint.npz with save_mlp_checkpoint, or install torch."
-        ) from exc
-    blob = torch.load(path, map_location="cpu", weights_only=False)
-    state: dict[str, Any]
+NESTED_STATE_KEYS: tuple[str, ...] = (
+    "state_dict",
+    "mlp_state_dict",
+    "model_state_dict",
+    "predictor_state_dict",
+    "head_state_dict",
+    "predictor",
+    "head",
+    "model",
+    "module",
+    "mlp",
+    "net",
+)
+
+
+def _as_numpy_tensor(value: Any) -> np.ndarray | None:
+    if value is None:
+        return None
+    if hasattr(value, "detach"):
+        return value.detach().float().cpu().numpy()
+    if isinstance(value, np.ndarray):
+        return np.asarray(value)
+    if isinstance(value, (list, tuple)) and value and isinstance(value[0], (int, float)):
+        return np.asarray(value, dtype=np.float64)
+    return None
+
+
+def _natural_key(name: str) -> tuple[Any, ...]:
+    parts: list[Any] = []
+    for chunk in re.split(r"(\d+)", name):
+        if chunk.isdigit():
+            parts.append(int(chunk))
+        elif chunk:
+            parts.append(chunk)
+    return tuple(parts)
+
+
+def collect_linear_tensors(
+    tree: Any,
+    *,
+    prefix: str = "",
+    _depth: int = 0,
+) -> tuple[list[tuple[str, np.ndarray]], list[tuple[str, np.ndarray]], dict[str, Any]]:
+    """Walk nested dicts until 2-D ``*weight*`` tensors are found.
+
+    Spark checkpoints nest the MLP under ``mlp_state_dict`` with keys like
+    ``net.0.weight``. Also accepts top-level ``state_dict`` / ``model_state_dict``.
+    """
+    weights: list[tuple[str, np.ndarray]] = []
+    biases: list[tuple[str, np.ndarray]] = []
     meta: dict[str, Any] = {}
-    if isinstance(blob, dict) and "state_dict" in blob:
-        state = dict(blob["state_dict"])
-        meta = {k: v for k, v in blob.items() if k != "state_dict"}
-    elif isinstance(blob, dict):
-        state = blob
-    else:
-        raise ValueError(f"cannot interpret torch checkpoint {path}")
-    weight_items = []
-    bias_items = []
-    for key, value in state.items():
-        if not hasattr(value, "detach") and not isinstance(value, np.ndarray):
+    if _depth > 8:
+        return weights, biases, meta
+    if not isinstance(tree, dict):
+        return weights, biases, meta
+
+    for key, value in tree.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        arr = _as_numpy_tensor(value)
+        lname = str(key).lower()
+        if arr is not None and arr.ndim == 2 and ("weight" in lname or lname.startswith("w")):
+            weights.append((path, np.asarray(arr, dtype=np.float64)))
             continue
-        arr = value.detach().float().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
-        lname = key.lower()
-        if arr.ndim == 2 and ("weight" in lname or lname.startswith("w")):
-            weight_items.append((key, arr))
-        elif arr.ndim == 1 and "bias" in lname:
-            bias_items.append((key, arr))
-    if not weight_items:
-        raise ValueError(f"{path} has no 2-D weight tensors")
-    weight_items.sort(key=lambda kv: kv[0])
-    bias_items.sort(key=lambda kv: kv[0])
-    w0 = weight_items[0][1]
-    w_last = weight_items[-1][1]
+        if arr is not None and arr.ndim == 1 and "bias" in lname:
+            biases.append((path, np.asarray(arr, dtype=np.float64)))
+            continue
+        if isinstance(value, dict):
+            if str(key) in NESTED_STATE_KEYS or _depth == 0:
+                sub_w, sub_b, sub_m = collect_linear_tensors(
+                    value, prefix=path, _depth=_depth + 1
+                )
+                weights.extend(sub_w)
+                biases.extend(sub_b)
+                meta.update(sub_m)
+            elif any(
+                isinstance(v, dict)
+                or (hasattr(v, "ndim") and getattr(v, "ndim", 0) >= 1)
+                or hasattr(v, "detach")
+                for v in value.values()
+            ):
+                sub_w, sub_b, sub_m = collect_linear_tensors(
+                    value, prefix=path, _depth=_depth + 1
+                )
+                weights.extend(sub_w)
+                biases.extend(sub_b)
+                meta.update(sub_m)
+            continue
+        if key in {
+            "horizon_frames",
+            "lambda_reg",
+            "H",
+            "h",
+            "hidden_dim",
+            "embed_dim",
+            "width",
+            "n_layers",
+        }:
+            meta[str(key)] = value
+    return weights, biases, meta
+
+
+def load_mlp_from_state_tree(
+    tree: Any,
+    *,
+    fallback: tuple[int, float] | None = None,
+    path: Path | None = None,
+    fmt: str = "state-tree",
+) -> LoadedCheckpoint:
+    """Build an ``MLPPredictor`` from a nested state dict (numpy or torch)."""
+    if not isinstance(tree, dict):
+        raise ValueError(f"state tree must be a dict, got {type(tree).__name__}")
+    weights, biases, meta = collect_linear_tensors(tree)
+    if not weights:
+        keys = list(tree) if isinstance(tree, dict) else []
+        loc = f" ({path})" if path is not None else ""
+        raise ValueError(
+            f"checkpoint{loc} has no 2-D weight tensors. Looked recursively for "
+            "state_dict / mlp_state_dict / model_state_dict / predictor and "
+            "keys matching *weight*. "
+            f"Top-level keys: {keys}"
+        )
+    weights.sort(key=lambda kv: _natural_key(kv[0]))
+    biases.sort(key=lambda kv: _natural_key(kv[0]))
+    w0 = weights[0][1]
+    w_last = weights[-1][1]
     # Infer numpy vs torch layout from first layer: torch is [out, in].
     if w0.shape[0] < w0.shape[1]:
         hidden_dim, width = int(w0.shape[1]), int(w0.shape[0])
@@ -368,7 +505,7 @@ def _load_torch(path: Path, fallback: tuple[int, float] | None) -> LoadedCheckpo
         hidden_dim, width = int(w0.shape[0]), int(w0.shape[1])
         embed_dim = int(w_last.shape[1])
         layout_torch = False
-    n_layers = max(1, len(weight_items) - 1)
+    n_layers = max(1, len(weights) - 1)
     head = MLPPredictor(
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
@@ -376,24 +513,46 @@ def _load_torch(path: Path, fallback: tuple[int, float] | None) -> LoadedCheckpo
         n_layers=n_layers,
         seed=0,
     )
-    if len(head.layers) != len(weight_items):
+    if len(head.layers) != len(weights):
+        loc = f"{path} " if path is not None else ""
         raise ValueError(
-            f"{path} yielded {len(weight_items)} weights; MLP reconstruct has "
+            f"{loc}yielded {len(weights)} weights; MLP reconstruct has "
             f"{len(head.layers)} layers. Save an in-repo .npz instead."
         )
-    for layer, (_k, w), (_bk, b) in zip(head.layers, weight_items, bias_items or [(None, None)] * len(weight_items)):
+    bias_by_idx = list(biases)
+    for i, layer in enumerate(head.layers):
+        _k, w = weights[i]
         if layout_torch:
             w = np.asarray(w, dtype=np.float64).T
         layer.w = _coerce_weight(w, layer.n_in, layer.n_out)
-        if b is not None:
-            layer.b = np.asarray(b, dtype=np.float64).reshape(-1)
-    horizon = int(meta.get("horizon_frames", fallback[0] if fallback else 1))
+        if i < len(bias_by_idx):
+            layer.b = np.asarray(bias_by_idx[i][1], dtype=np.float64).reshape(-1)
+    horizon = int(
+        meta.get(
+            "horizon_frames",
+            meta.get("H", meta.get("h", fallback[0] if fallback else 1)),
+        )
+    )
     lam = float(meta.get("lambda_reg", fallback[1] if fallback else 0.0))
     return LoadedCheckpoint(
         head=head,
         horizon_frames=horizon,
         lambda_reg=lam,
-        path=path,
-        format="torch",
-        extra={"keys": [k for k, _ in weight_items]},
+        path=path or Path("<memory>"),
+        format=fmt,
+        extra={"keys": [k for k, _ in weights]},
     )
+
+
+def _load_torch(path: Path, fallback: tuple[int, float] | None) -> LoadedCheckpoint:
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError(
+            f"torch is required to read {path}. Convert the Spark checkpoint "
+            "to checkpoint.npz with save_mlp_checkpoint, or install torch."
+        ) from exc
+    blob = torch.load(path, map_location="cpu", weights_only=False)
+    if not isinstance(blob, dict):
+        raise ValueError(f"cannot interpret torch checkpoint {path}")
+    return load_mlp_from_state_tree(blob, fallback=fallback, path=path, fmt="torch")

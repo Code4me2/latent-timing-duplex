@@ -241,9 +241,11 @@ src/latent_timing_duplex/phase1/
   losses.py     MSE + isotropic-Gaussian regularizer
   train.py      head-only loop stub
   surprise.py   surprise metric + harness hook
-  labels.py     gold JSONL + transcript / VAD proxies
-  series.py     NLL / VAP / surprise JSONL alignment
-  checkpoint.py h*_lam* + SELECTION_LOCKED.json
+  labels.py     gold JSONL + transcript / VAD / CANDOR CSV proxies
+  series.py     NLL / VAP / surprise JSONL alignment (reject aggregates)
+  artifacts.py  candor_/dc_ .pt filename aliases
+  checkpoint.py h*_lam* + H_set lock + nested mlp_state_dict
+  export_series.py  per-step NLL/VAP JSONL schema (no invented series)
   compare.py    surprise vs NLL vs VAP on one timeline
   windows.py    equal-length first-W / mid-W crops
   paths.py      spark-61dd path constants
