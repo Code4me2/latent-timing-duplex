@@ -421,7 +421,8 @@ def cmd_phase1_eval(args: argparse.Namespace) -> int:
             "\nSpark real run needs --ablations-root (or --checkpoint + "
             "--hidden-dir/--target-dir or --surprise-jsonl), --nll-jsonl, "
             "--vap-jsonl, and --labels or --transcripts/--vad. "
-            "See docs/EVAL_PROTOCOL_PHASE1.md. Do not invent findings."
+            "See docs/EVAL_PROTOCOL_PHASE1.md and "
+            "docs/PHASE1_RQ2_INTERIM.md. Do not invent findings."
         )
         return 0
 

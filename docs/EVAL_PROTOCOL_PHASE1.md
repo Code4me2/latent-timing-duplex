@@ -17,8 +17,10 @@ barge-ins) better than (a) Moshi user-channel token/codebook NLL and (b) VAP,
 **on the same mid-180 s windows**?
 
 The scorer emits AUROC, AUPRC, and precision-recall operating points for every
-named signal. A later write-up may call the comparison predictive / weakly
-predictive / not predictive. **This repository does not make that call.**
+named signal. The Spark interim write-up is
+[PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md) (weakly predictive on a
+CANDOR transcript proxy; not gold, not cross-corpus, not Phase 2). This
+protocol file still does not invent digits.
 
 ## Locked settings
 

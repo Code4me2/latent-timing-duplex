@@ -99,4 +99,7 @@ Turn-event compare (surprise vs Moshi NLL vs VAP, mid-180, seed
 `20260903`) is `ltd phase1-eval`. Pass local JSONL / checkpoint paths;
 this repo does not open `/home/velvet/...` unless you do. Flags and the
 H∈{1,12,62} / λ=0.01 protocol: [EVAL_PROTOCOL_PHASE1.md](EVAL_PROTOCOL_PHASE1.md).
+Spark RQ2 interim findings (external artifacts under
+`/home/velvet/cs199-phase1-work/eval/windows/mid180/`):
+[PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md).
 Do not start Phase 2 from that command.
