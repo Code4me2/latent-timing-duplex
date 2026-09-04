@@ -19,8 +19,9 @@ barge-ins) better than (a) Moshi user-channel token/codebook NLL and (b) VAP,
 The scorer emits AUROC, AUPRC, and precision-recall operating points for every
 named signal. The Spark interim write-up is
 [PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md) (weakly predictive on a
-CANDOR transcript proxy; not gold, not cross-corpus, not Phase 2). This
-protocol file still does not invent digits.
+CANDOR transcript proxy first; evening-PT addendum is a channel-energy
+VAD pool, not gold, not Phase 2). This protocol file still does not
+invent digits.
 
 ## Locked settings
 
