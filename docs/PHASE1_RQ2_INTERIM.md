@@ -16,7 +16,9 @@ above Moshi user-channel NLL and VAP `p(shift)` for `turn_shift` at
 `h=1.0` s. That is a proxy ranking, not a gold-label or cross-corpus result.
 The **CANDOR-only table below remains the first primary.** An evening-PT
 **cross-corpus proxy addendum** (channel-energy VAD, not gold) is appended
-after the original non-claims.
+after the original non-claims. Pooled eval-horizon CIs (B=10000) from
+Spark `EVENT_HORIZON_GRID.md` are a later section; they do not replace
+the first primary and are **not gold**.
 
 ## What ran
 | Item | Value |
@@ -51,9 +53,11 @@ proxy. VAP is near chance.
 
 ## Other cells (brief; not the headline)
 The same run scored the Phase 0 eval grid, including **h=0.5 s**, and the
-other kinds **`barge_in`** and **`backchannel`**. Those cells are in the Spark
-JSON, not copied here. They do not change the headline: this note claims only
-the `turn_shift` / `h=1.0` s ranking above.
+other kinds **`barge_in`** and **`backchannel`**. CANDOR-only cells stay
+in the Spark JSON. Pooled `turn_shift` CIs at h=0.5 / 1.0 / 2.0 s are
+in **EVENT_HORIZON_GRID** below. They do not change the first-primary
+headline: this note's first claim is still the CANDOR-only
+`turn_shift` / `h=1.0` s ranking above.
 
 Horizon × λ grid on this same proxy (ranking only; no extra digits):
 
@@ -88,8 +92,9 @@ Horizon × λ grid on this same proxy (ranking only; no extra digits):
 - **Reconstruction at λ=0 is a different question.** Best embed-MSE at λ=0
   does not license a turn-event claim, and λ=0.01 ≈ λ=0 here anyway.
 - **Not a Phase 1 science freeze.** n=44, one corpus, proxy events, one
-  primary cell published as point estimates. CIs and the full grid live on
-  Spark; this note does not invent them.
+  primary cell published as point estimates. Pooled eval-horizon CIs from
+  Spark `EVENT_HORIZON_GRID.md` are copied below; they do not upgrade
+  this CANDOR-only table.
 
 ## Artifact paths (spark-61dd, external)
 This repository does not vendor the JSON. CI must not open these paths.
@@ -99,7 +104,8 @@ This repository does not vendor the JSON. CI must not open these paths.
 ```
 
 Typical siblings (H / λ repeats): `h12_lam0.01.json`, `h12_lam0.json`,
-`h1_lam0.01.json`, and the rest of the locked grid. Scorer:
+`h1_lam0.01.json`, and the rest of the locked grid. Pooled eval-horizon
+CIs: `EVENT_HORIZON_GRID.md`. Scorer:
 `ltd phase1-eval` (see [EVAL_PROTOCOL_PHASE1.md](EVAL_PROTOCOL_PHASE1.md)).
 
 Evening-PT DuplexChat channel-energy VAD (external; not vendored):
@@ -166,9 +172,48 @@ not license a detector or a Phase 2 start.
 - **Still weakly predictive language.** Pooled surprise is above the
   two frozen baselines on this proxy and is not “timing control works.”
 
+Silence/collapse on the same mid-180 pool is a **different question**
+(representation flatline in mutual silence, not turn-event AUROC). That
+proxy diagnostic is in [PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md):
+criterion not met (0/57). It does not upgrade this ranking and is
+**not a timing win** by itself.
+
+## EVENT_HORIZON_GRID — pooled `turn_shift` CIs
+
+Spark `EVENT_HORIZON_GRID.md` on the **pooled** mid-180 proxy (H=12,
+λ=0.01, B=10000 session-level Efron). **Proxies ≠ gold.** This is not
+the CANDOR-only first primary and is not a freeze.
+
+`turn_shift` AUROC:
+
+| Eval h | `jepa:surprise` | `nll:moshi` | `vap:p_shift` |
+|---|---|---|---|
+| 0.5 s | 0.653 [0.624, 0.681] | 0.412 [0.375, 0.451] | 0.511 [0.473, 0.549] |
+| 1.0 s | 0.645 [0.612, 0.676] | 0.463 [0.431, 0.497] | 0.511 [0.476, 0.545] |
+| 2.0 s | 0.583 [0.554, 0.610] | 0.488 [0.460, 0.515] | 0.505 [0.474, 0.538] |
+
+The h=1.0 s surprise point 0.645 matches the evening-PT pooled addendum.
+Other kinds (brief; not the headline): pooled surprise at 1.0 s is
+about **0.63** on `barge_in` and about **0.60** on `backchannel`.
+
+**Interpretation.** Strongest *offline* edge is at **0.5–1.0 s**
+`turn_shift`. The edge **weakens at 2.0 s** (0.583). Still *weakly
+predictive on this proxy*. CIs do not license a detector, a gold-label
+claim, or Phase 2.
+
+External (not vendored; CI must not open):
+
+```
+/home/velvet/cs199-phase1-work/eval/windows/mid180/EVENT_HORIZON_GRID.md
+```
+
 ## Recommended next
 1. Gold or audited labels (do not treat CSV proxies or channel-energy
    VAD as final).
 2. Treat the DC n=12 VAD split as a small-n check, not a second primary.
-3. Publish CIs from the Spark JSON if a freeze is declared.
+3. Pooled `turn_shift` CIs are now in EVENT_HORIZON_GRID above; they are
+   still not a freeze. Do not invent the rest of the Spark JSON.
 4. Do **not** start Phase 2 from this ranking.
+5. Do **not** treat the silence/collapse null
+   ([PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md)) as a
+   timing-control result.

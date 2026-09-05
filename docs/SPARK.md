@@ -103,5 +103,11 @@ Spark RQ2 interim findings (external artifacts under
 `/home/velvet/cs199-phase1-work/eval/windows/mid180/`; evening-PT DC
 channel-energy VAD at
 `/home/velvet/cs199-phase1-work/eval/duplexchat_mid180_channel_energy_vad.jsonl`):
-[PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md).
+[PHASE1_RQ2_INTERIM.md](PHASE1_RQ2_INTERIM.md)
+(pooled eval-horizon CIs: `.../mid180/EVENT_HORIZON_GRID.md`; not gold,
+not a freeze).
+Silence/collapse diagnostic (external
+`.../mid180/SILENCE_COLLAPSE.md` / `.json`; criterion not met, 0/57;
+not a timing win):
+[PHASE1_SILENCE_COLLAPSE.md](PHASE1_SILENCE_COLLAPSE.md).
 Do not start Phase 2 from that command.

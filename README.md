@@ -20,7 +20,7 @@ Whether the *implicit* next-token signal is already predictive of turn events is
 | Phase | Scope | In this repo now |
 |---|---|---|
 | **0** (weeks 1–5) | Inference wrappers, VAP baseline, 200–500 h working subset, eval harness, frozen user-channel NLL | **Frozen.** Synthetic harness, Moshi delay-NaN NLL, CPU VAP, Spark 10-clip reference. Findings: [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md). Protocol: [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md). |
-| **1** | JEPA-style latent predictor on the next user-audio chunk; surprise as salience | **Scaffolding + turn-event scorer.** Plan, CPU head/loss/dataset, and `ltd phase1-eval` (surprise vs Moshi NLL vs VAP on mid-180). Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy VAD addendum, no overclaim): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). No Phase 2. See [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md) and [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). |
+| **1** | JEPA-style latent predictor on the next user-audio chunk; surprise as salience | **Scaffolding + turn-event scorer.** Plan, CPU head/loss/dataset, and `ltd phase1-eval` (surprise vs Moshi NLL vs VAP on mid-180). Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy VAD addendum; pooled EVENT_HORIZON_GRID CIs, no overclaim): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). Silence/collapse diagnostic (null; 0/57; not a timing win): [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md). No Phase 2. See [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md) and [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). |
 | **2** | Condition the dialogue policy on that salience signal | Out of scope. `Phase2OutOfScope` if a caller tries to unfreeze a backbone. |
 
 Phase 0 is frozen (equal-length windows; prefer fixed-W). Phase 1 trains **small heads only** on frozen Moshi hidden states. Velvet approved starting Phase 1 after that freeze.
@@ -115,7 +115,7 @@ src/latent_timing_duplex/
                  train, surprise, labels, series, checkpoint, compare)
 configs/         YAML defaults + spark_slice.yaml + phase1.yaml
 docs/            SPARK.md, Phase 0 freeze, PHASE1_PLAN.md, EVAL_PROTOCOL_PHASE1.md,
-                 PHASE1_RQ2_INTERIM.md
+                 PHASE1_RQ2_INTERIM.md, PHASE1_SILENCE_COLLAPSE.md
 tests/           harness, delay-NaN NLL, VAP pooling, Spark reference, Phase 1 shapes/losses/compare
 ```
 
@@ -125,7 +125,7 @@ Local `./data`, `./weights`, and `./cache` are gitignored. Create them yourself 
 
 Phase 0 asked whether frozen user-channel NLL (and VAP) already predict turn events. That work is **frozen**: equal-length windows, documented slices, no invented digits. Read [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) and [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md) before comparing any new signal to those baselines. Prefer fixed windows (mid-180 primary).
 
-Phase 1 (this repo now) precomputes frozen Moshi hidden states and user-chunk embeddings, then trains a **small** predictor head (single-digit millions of params) with a JEPA-style isotropic-Gaussian regularizer. Surprise is the per-chunk prediction error and plugs into the same harness. Moshi / BayLing stay frozen. Operational steps, Spark paths (`/home/velvet/cs199-*`), ablations, and success criteria: [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). Turn-event protocol (mid-180, seed `20260903`, H∈{1,12,62}, λ=0.01 primary / λ=0 reference): [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). Spark primary numbers and caveats (CANDOR-only proxy n=44 first; evening-PT pooled n≈56 channel-energy VAD addendum): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). Do not upgrade that note into a gold-label or Phase 2 claim.
+Phase 1 (this repo now) precomputes frozen Moshi hidden states and user-chunk embeddings, then trains a **small** predictor head (single-digit millions of params) with a JEPA-style isotropic-Gaussian regularizer. Surprise is the per-chunk prediction error and plugs into the same harness. Moshi / BayLing stay frozen. Operational steps, Spark paths (`/home/velvet/cs199-*`), ablations, and success criteria: [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). Turn-event protocol (mid-180, seed `20260903`, H∈{1,12,62}, λ=0.01 primary / λ=0 reference): [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). Spark primary numbers and caveats (CANDOR-only proxy n=44 first; evening-PT pooled n≈56 channel-energy VAD addendum): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). Silence/collapse on 57 mid-180 sessions (channel-energy masks; criterion not met, 0/57): [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md). Do not upgrade either note into a gold-label, Phase 2, or timing-win claim.
 
 ### Spark: what `ltd phase1-eval` still needs at runtime
 

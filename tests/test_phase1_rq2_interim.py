@@ -50,6 +50,30 @@ def test_rq2_interim_note_exists_and_does_not_overclaim() -> None:
     assert "not asr" in text.lower()
     assert text.find("## Primary table") < text.find("## Addendum")
     assert text.find("0.632") < text.find("0.645")
+    # Pooled EVENT_HORIZON_GRID CIs (after addendum; not gold, not a freeze).
+    assert "EVENT_HORIZON_GRID" in text
+    assert (
+        "/home/velvet/cs199-phase1-work/eval/windows/mid180/"
+        "EVENT_HORIZON_GRID.md"
+    ) in text
+    assert "0.653" in text and "0.624" in text and "0.681" in text
+    assert "0.375" in text and "0.451" in text
+    assert "0.473" in text and "0.549" in text
+    assert "0.612" in text and "0.676" in text
+    assert "0.431" in text and "0.497" in text
+    assert "0.476" in text and "0.545" in text
+    assert "0.583" in text and "0.554" in text and "0.610" in text
+    assert "0.460" in text and "0.515" in text
+    assert "0.474" in text and "0.538" in text
+    assert "B=10000" in text
+    assert "about **0.63**" in text or "about 0.63" in text
+    assert "about **0.60**" in text or "about 0.60" in text
+    assert "barge_in" in text and "backchannel" in text
+    assert "0.5–1.0" in text or "0.5-1.0" in text
+    assert "weakens" in text.lower()
+    assert "2.0" in text
+    assert text.find("## Addendum") < text.find("## EVENT_HORIZON_GRID")
+    assert text.find("0.645") < text.find("0.653")
 
 
 def test_readme_and_plan_link_rq2_interim() -> None:
@@ -63,3 +87,5 @@ def test_readme_and_plan_link_rq2_interim() -> None:
     assert "n≈56" in readme
     assert "channel-energy" in plan.lower()
     assert "VAD ≠ gold" in plan or "vad ≠ gold" in plan.lower()
+    assert "EVENT_HORIZON_GRID" in readme
+    assert "EVENT_HORIZON_GRID" in plan
