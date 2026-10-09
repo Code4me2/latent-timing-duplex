@@ -11,7 +11,7 @@ should not be rewritten to make later work look predeclared.
 Can a predictive latent derived from a frozen full-duplex model expose upcoming
 turn events, and can that latent causally improve live response timing?
 
-The first half has a promising proxy result. The second is not established.
+The existing Phase 1 result is a promising **retrospective activity-transition association**, not an online timing predictor: its error at source frame `t` requires realized future states through `t+2H`. Semantic silence interpretation and causal generation control are not established.
 
 ## What was actually trained
 
@@ -37,7 +37,7 @@ latent prediction.
 | Moshi, BayLing-Duplex, and VAP run on the stereo pipeline | Replayed engineering runs | Required dependency | Validated |
 | Full-length CANDOR has higher Moshi NLL than DuplexChat | Numerical observation with disjoint duration support | Historical diagnostic | Length-confounded; not a primary claim |
 | Equal-length cross-corpus Moshi NLL difference | Mid-180 n=12 comparison | Decision-relevant | No significant durable gap |
-| H=12 surprise predicts proxy turn events | Session-bootstrap numerical observation | Decision-relevant | Promising proxy signal |
+| H=12 surprise associates with later proxy turn events | Retrospective, future-observing numerical observation | Useful diagnostic | Not causally available for online timing |
 | Isotropic regularization improves timing prediction | λ ablation | Decision-relevant | Unsupported; λ=0.01 ≈ λ=0 in event ranking |
 | C1 offline residual improves future-VAD BCE | Held-out proxy readout | Diagnostic | Predictive information reaches the injector |
 | Live residual/LoRA improves duplex timing | Twelve-session live decode | Decision-relevant | Inconclusive; no JEPA-specific control result |
@@ -100,11 +100,21 @@ The package remains Phase 1-only and still raises `Phase2OutOfScope` for
 backbone training. Phase 2 is retained as an external exploratory experiment,
 not a supported package API.
 
+## Causal-availability correction
+
+Existing surprise is assigned to source frame `t`, but its target is
+`mean(transformer_out[t+H:t+2H])`. At H=12 it requires roughly 0.96–1.92 s
+of future audio, overlapping the nominal event-prediction window. It must be
+retimestamped to its availability time for any online comparison. The causal
+quantity available at `t` is the predicted latent itself, not its realized
+future error.
+
 ## Decision
 
-Pause further control scaling. The next experiment should first test whether
-the signal is specifically predictive rather than a proxy for generic acoustic
-or representation change.
+Pause further control scaling. Shift to the causal silence-state/hazard path in
+[RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md). The next experiment should test
+whether frozen causal state distinguishes action-relevant silence beyond
+acoustic, duration, and representation-change controls.
 
 Predeclare an untouched evaluation over the DuplexChat sessions added after
 the original head was trained. Compare surprise with raw energy, energy

@@ -17,9 +17,20 @@ def test_current_status_names_the_real_target_and_non_claims() -> None:
     assert "future hidden-state prediction error" in status
     assert "not yet future user-audio latent prediction" in " ".join(status.split())
     assert "0.669 [0.642, 0.696]" in status
+    assert "retrospective" in status
+    assert "t+2H" in status
     assert "No Phase 2 efficacy gate has\npassed" in phase2
     assert "CURRENT_STATUS.md" in readme
+    assert "RESEARCH_ROADMAP.md" in readme
     assert "PHASE2_EXPLORATORY.md" in readme
+
+
+def test_roadmap_keeps_future_stages_gated() -> None:
+    roadmap = (ROOT / "docs" / "RESEARCH_ROADMAP.md").read_text(encoding="utf-8")
+    assert "silence-state and competing-hazard sidecar" in roadmap
+    assert "future PR #11" in roadmap
+    assert "Created only after R1/R2 gates pass" in roadmap
+    assert "do not post-hoc mute" in " ".join(roadmap.lower().split())
 
 
 def test_phase2_receipt_hashes_and_gate_kinds() -> None:
