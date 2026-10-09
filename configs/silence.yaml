@@ -1,0 +1,14 @@
+silence:
+  checkpoints_s: [0.24, 0.48, 0.96, 2.0, 3.0, 5.0, 10.0]
+  duration_strata_s: [1.0, 3.0]
+  max_episodes_per_session: 5
+  split_seed: 20261009
+  gate:
+    threshold: 0.6
+    consecutive_frames: 2
+
+annotation:
+  primary_actions: [wait, ack, respond, repair, unratable]
+  annotators_per_item: 3
+  pilot_episodes: [60, 90]
+  agreement_gate: 0.80
