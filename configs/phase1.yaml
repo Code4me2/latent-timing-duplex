@@ -10,9 +10,15 @@ chunk:
   right: assistant
 
 phase1:
-  # Predictor look-ahead (not the turn-event eval grid).
+  # Historical scaffold grid (not the realized Spark grid).
   horizons_s: [0.08, 1.00, 5.00]
   lambda_reg: [0.0, 0.1, 1.0, 10.0]
+  realized_spark:
+    horizon_frames: [1, 12, 62]
+    lambda_reg: [0.0, 0.01, 0.1, 1.0]
+    target: future_moshi_transformer_state_mean
+    target_note: not_an_independent_user_audio_embedding
+    phase2_receipt: docs/PHASE2_EXPLORATORY.md
   head:
     type: mlp
     hidden_dim: 4096

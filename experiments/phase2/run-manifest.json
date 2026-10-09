@@ -1,0 +1,67 @@
+{
+  "schema": "latent-timing-duplex/phase2-receipt/v1",
+  "run_date_pt": "2026-09-25",
+  "host": "spark-61dd",
+  "status": "exploratory_not_frozen",
+  "target_semantics": "mean future Moshi transformer_out[t+H:t+2H], not an independent user-audio embedding",
+  "injection_semantics": "predicted 256-D latent through residual injector, not scalar surprise",
+  "scripts": [
+    {
+      "path": "snapshots/c0_train.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c0_2026-09-25/train_c0.py",
+      "sha256": "417dbd26fc986d80c9626368edd2debf04c797334163594e351161501caa49a7"
+    },
+    {
+      "path": "snapshots/c0_export_surprise.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c0_2026-09-25/export_surprise_c0.py",
+      "sha256": "2f2b9b82362db1c5b4df793ff0e00fa0eb9a3f179ade125a08172d0ed4ca3d7f"
+    },
+    {
+      "path": "snapshots/c1_train.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c1_2026-09-25/train_c1.py",
+      "sha256": "17353c76a6957a77a1959855d35d3ad26bd89d5eb27e0f03ba9272256ea2e3d4"
+    },
+    {
+      "path": "snapshots/c1_offline_eval.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c1_2026-09-25/offline_eval_c1.py",
+      "sha256": "b0d8e86e1be91305f2797e38845ab54fecd2d886d305d5f7ada58fcefd4ba7f6"
+    },
+    {
+      "path": "snapshots/c1_live_decode.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c1_live_2026-09-25/l1_live_decode.py",
+      "sha256": "822a591ea8c7c2d7ebda27834f949c8f8f9b90ca2084d73a5b56047129d9efc3"
+    },
+    {
+      "path": "snapshots/c2_train_and_live.py",
+      "source": "/home/velvet/cs199-phase1-work/eval/phase2_c2_2026-09-25/c2_train_and_live.py",
+      "sha256": "8860bd3af2cbb6e791c3c7f9b66de99070782440cd89580f343294b828621043"
+    }
+  ],
+  "results": {
+    "c0_turn_shift_auroc_1s_pooled": 0.6466221082618573,
+    "c1_offline_bce": {
+      "inject": 0.4393,
+      "shuffle": 0.4629,
+      "none": 0.4570
+    },
+    "c1_live_collapse": {
+      "inject": 11,
+      "shuffle": 11,
+      "none": 11,
+      "n_sessions": 12
+    },
+    "c2_live_collapse": {
+      "inject": 4,
+      "shuffle": 2,
+      "none_lora_on": 5,
+      "lora_off": 11,
+      "n_sessions": 12
+    }
+  },
+  "gates": {
+    "c0": "exploratory_proxy_gate",
+    "c1_live": "execution_only",
+    "c2": "execution_only",
+    "phase2_efficacy": "not_passed"
+  }
+}

@@ -56,5 +56,8 @@ htmlcov/
 # Jupyter (notebooks are not the product)
 .ipynb_checkpoints/
 
-# Local tool scratch (not part of the package)
+# Local tool scratch and experiment outputs (not part of the package)
 /agent-tools/
+/experiments/**/artifacts/
+/experiments/**/*.log
+/experiments/**/*.jsonl
