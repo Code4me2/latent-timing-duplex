@@ -97,5 +97,18 @@ def verify_receipt(receipt: Mapping[str, Any], key: bytes, where: str = "receipt
         raise ValueError(f"{where} HMAC verification failed")
 
 
+def require_disjoint_output(output: str | Path, protected_roots: list[str | Path]) -> None:
+    """Reject an output at, above, or below an authenticated package root."""
+    resolved_output = Path(output).resolve()
+    for root in protected_roots:
+        resolved_root = Path(root).resolve()
+        if (
+            resolved_output == resolved_root
+            or resolved_output in resolved_root.parents
+            or resolved_root in resolved_output.parents
+        ):
+            raise ValueError("output must be separate from authenticated input packages")
+
+
 def receipt_bytes(receipt: Mapping[str, Any]) -> bytes:
     return (json.dumps(receipt, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True) + "\n").encode("utf-8")

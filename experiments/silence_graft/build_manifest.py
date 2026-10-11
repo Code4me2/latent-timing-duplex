@@ -36,6 +36,19 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def _nonfinite(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value}")
+
+
 def _records(payload: bytes) -> list[dict[str, Any]]:
     try:
         lines = payload.decode("utf-8").splitlines()
@@ -46,9 +59,10 @@ def _records(payload: bytes) -> list[dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            row = json.loads(line)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"malformed JSON on line {line_number}: {error.msg}") from error
+            row = json.loads(line, object_pairs_hook=_strict_object, parse_constant=_nonfinite)
+        except (json.JSONDecodeError, ValueError) as error:
+            message = error.msg if isinstance(error, json.JSONDecodeError) else str(error)
+            raise ValueError(f"malformed JSON on line {line_number}: {message}") from error
         if not isinstance(row, dict):
             raise ValueError(f"JSON row {line_number} must be an object")
         records.append(row)

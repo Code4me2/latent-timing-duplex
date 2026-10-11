@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from latent_timing_duplex.config import repo_root
+from latent_timing_duplex.silence.outcomes import nearest_frame
 
 try:
     from experiments.silence_graft.receipts import (
@@ -53,9 +54,15 @@ def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _nonfinite(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value}")
+
+
 def _json(payload: bytes, name: str) -> dict[str, Any]:
     try:
-        value = json.loads(payload.decode("utf-8"), object_pairs_hook=_object)
+        value = json.loads(
+            payload.decode("utf-8"), object_pairs_hook=_object, parse_constant=_nonfinite
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         raise ValueError(f"invalid {name}: {error}") from error
     if not isinstance(value, dict):
@@ -73,7 +80,7 @@ def _jsonl(payload: bytes, name: str) -> list[dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            row = json.loads(line, object_pairs_hook=_object)
+            row = json.loads(line, object_pairs_hook=_object, parse_constant=_nonfinite)
         except (json.JSONDecodeError, ValueError) as error:
             raise ValueError(f"invalid {name} line {line_number}: {error}") from error
         if not isinstance(row, dict):
@@ -270,7 +277,7 @@ def _media_rows(payload: bytes, pilot_sessions: set[str]) -> dict[str, dict[str,
 
 
 def _nearest_frame(seconds: float, sample_rate: int) -> int:
-    return int(math.floor(seconds * sample_rate + 0.5))
+    return nearest_frame(seconds, sample_rate)
 
 
 def _item_id(key: bytes, episode_id: str, cutoff_s: float) -> str:
@@ -278,12 +285,12 @@ def _item_id(key: bytes, episode_id: str, cutoff_s: float) -> str:
     return hmac.new(key, identity, hashlib.sha256).hexdigest()
 
 
-def _wav_info(path: Path) -> tuple[int, int, int, int]:
+def _wav_info(path: Path, minimum_channels: int = 2) -> tuple[int, int, int, int]:
     try:
         with wave.open(str(path), "rb") as source:
             channels, width = source.getnchannels(), source.getsampwidth()
             rate, frames, compression = source.getframerate(), source.getnframes(), source.getcomptype()
-            if compression != "NONE" or channels < 2 or width not in (1, 2, 3, 4) or rate <= 0:
+            if compression != "NONE" or channels < minimum_channels or width not in (1, 2, 3, 4) or rate <= 0:
                 raise ValueError(f"unsupported PCM WAV {path}")
             remaining = frames
             while remaining:

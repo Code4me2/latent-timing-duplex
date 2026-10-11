@@ -11,6 +11,7 @@ import pytest
 
 from experiments.silence_graft.build_manifest import (
     _publish_artifacts,
+    _records,
     _sessions,
     assign_lineage_splits,
     build_manifests,
@@ -23,6 +24,13 @@ from latent_timing_duplex.silence import extract_silence_checkpoints, sample_epi
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
+
+def test_vad_json_rejects_duplicate_keys_and_nonfinite_numbers() -> None:
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        _records(b'{"session_id":"one","session_id":"two"}\n')
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        _records(b'{"duration_s":NaN}\n')
 
 
 def test_lineage_cap_spans_sessions() -> None:

@@ -29,6 +29,14 @@ def test_average_precision_perfect() -> None:
     assert average_precision(np.array([0, 0]), np.array([0.1, 0.2])) is None
 
 
+def test_average_precision_is_invariant_to_order_with_tied_scores() -> None:
+    labels = np.array([1, 0, 1, 0])
+    scores = np.ones(4)
+    expected = average_precision(labels, scores)
+    assert expected == 0.5
+    assert average_precision(labels[::-1], scores[::-1]) == expected
+
+
 def test_synthetic_salience_beats_random() -> None:
     bundle = generate_synthetic_session(duration_s=120.0, seed=0)
     named = score_session_bundle(

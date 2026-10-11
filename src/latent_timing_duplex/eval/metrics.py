@@ -27,10 +27,14 @@ def average_precision(y_true: np.ndarray, y_score: np.ndarray) -> float | None:
     if n_pos == 0 or y_true.size == n_pos:
         return None
     order = np.argsort(-y_score, kind="mergesort")
-    ranked = y_true[order]
+    ranked, scores = y_true[order], y_score[order]
     hits = np.cumsum(ranked)
-    precision_at_hit = hits[ranked == 1] / (np.flatnonzero(ranked == 1) + 1)
-    return float(precision_at_hit.mean())
+    threshold_ends = np.r_[scores[1:] != scores[:-1], True]
+    true_positives = hits[threshold_ends]
+    predicted_positives = np.flatnonzero(threshold_ends) + 1
+    recall = true_positives / n_pos
+    recall_gain = np.diff(np.r_[0.0, recall])
+    return float(np.sum(recall_gain * (true_positives / predicted_positives)))
 
 
 def precision_recall_at_threshold(

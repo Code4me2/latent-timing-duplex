@@ -32,13 +32,14 @@ def fit_softmax_probe(
     steps: int = 1000,
     learning_rate: float = 0.1,
     l2: float = 1e-4,
+    class_balance: bool = True,
 ) -> SoftmaxProbe:
-    """Fit a class-balanced linear softmax probe with full-batch descent."""
+    """Fit a linear softmax probe with full-batch descent."""
     x = _as_matrix(features)
     y = np.asarray(labels)
     if x.shape[0] != y.size or y.size == 0:
         raise ValueError("features and non-empty labels must have matching rows")
-    if steps < 1 or learning_rate <= 0 or l2 < 0:
+    if steps < 1 or not np.isfinite(learning_rate) or not np.isfinite(l2) or learning_rate <= 0 or l2 < 0:
         raise ValueError("invalid optimizer settings")
     classes = np.asarray(np.unique(y) if classes is None else classes)
     class_index = {value: index for index, value in enumerate(classes.tolist())}
@@ -56,7 +57,7 @@ def fit_softmax_probe(
     z = (x - mean) / scale
     weights = np.zeros((z.shape[1], classes.size), dtype=np.float64)
     bias = np.zeros(classes.size, dtype=np.float64)
-    sample_weight = y.size / (classes.size * counts[yi])
+    sample_weight = y.size / (classes.size * counts[yi]) if class_balance else np.ones(y.size)
     target = np.eye(classes.size, dtype=np.float64)[yi]
 
     for _ in range(steps):

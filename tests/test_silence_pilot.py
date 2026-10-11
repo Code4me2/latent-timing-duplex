@@ -13,7 +13,11 @@ import pytest
 from experiments.silence_graft import build_assignments as assignments_module
 from experiments.silence_graft import render_clips as renderer_module
 from experiments.silence_graft.build_assignments import _sentinels, build_assignments, release
+from experiments.silence_graft.build_features import _pcm, _window_stats, build_features
+from experiments.silence_graft.build_manifest import assign_lineage_splits
 from experiments.silence_graft.compile_annotations import adjudicate, report
+from experiments.silence_graft.compile_r2_dataset import compile_r2_dataset
+from experiments.silence_graft.extract_outcomes import extract_outcomes
 from experiments.silence_graft.receipts import receipt_bytes, sign_receipt, verify_receipt
 from experiments.silence_graft.render_clips import render_clips
 
@@ -43,6 +47,38 @@ def _jsonl(rows) -> bytes:
     return ("\n".join(json.dumps(row, sort_keys=True, separators=(",", ":")) for row in rows) + "\n").encode()
 
 
+@pytest.mark.parametrize(
+    ("width", "negative", "positive", "scale"),
+    [(1, 64, 192, 128), (2, -16384, 16384, 32768), (3, -4194304, 4194304, 8388608), (4, -1073741824, 1073741824, 2147483648)],
+)
+def test_exact_cutoff_pcm_widths_and_trailing_boundaries(
+    tmp_path: Path, width: int, negative: int, positive: int, scale: int
+) -> None:
+    path = tmp_path / f"pcm-{width}.wav"
+    if width == 1:
+        payload = bytes([negative, positive] * 4)
+    else:
+        payload = b"".join(
+            value.to_bytes(width, "little", signed=True)
+            for _ in range(4)
+            for value in (negative, positive)
+        )
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(2)
+        handle.setsampwidth(width)
+        handle.setframerate(1000)
+        handle.writeframes(payload)
+    samples, rate, observed_width = _pcm(path)
+    assert (samples.shape, rate, observed_width) == ((4, 2), 1000, width)
+    expected_negative = (negative - 128) / scale if width == 1 else negative / scale
+    expected_positive = (positive - 128) / scale if width == 1 else positive / scale
+    np = pytest.importorskip("numpy")
+    np.testing.assert_allclose(samples, [[expected_negative, expected_positive]] * 4)
+    acoustic, change_onset, truncated = _window_stats(samples, rate)
+    assert acoustic.shape == (42,) and change_onset.shape == (18,) and truncated.shape == (6,)
+    assert truncated.tolist() == [1.0] * 6
+
+
 def _rows(path: Path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
@@ -51,32 +87,58 @@ def _inputs(tmp_path: Path, *, media_updates=None, manifest_updates=None, key_by
     tmp_path.mkdir(parents=True, exist_ok=True)
     wav = tmp_path / "private.wav"
     _write_wav(wav)
-    manifest_rows = [
-        {
+    candidates = [f"lineage-{index:03d}" for index in range(1000)]
+    candidate_splits = assign_lineage_splits(candidates, 20261009)
+    lineage_ids = (
+        [lineage for lineage in candidates if candidate_splits[lineage] == "train"][:15]
+        + [lineage for lineage in candidates if candidate_splits[lineage] == "development"][:15]
+    )
+    lineage_splits = {lineage: candidate_splits[lineage] for lineage in lineage_ids}
+    vad_rows = []
+    manifest_rows = []
+    for index in range(75):
+        session = f"source-session-{index:03d}"
+        lineage = lineage_ids[index % 30]
+        case = index % 4
+        resume = None if case == 3 else 1.0 if case == 2 else 1.5
+        user = [[0.0, 0.145], *([] if resume is None else [[resume, 2.0]])]
+        assistant = [[0.99 if case == 2 else 1.0, 1.1]] if case in {1, 2} else []
+        vad_rows.append({
+            "session_id": session, "lineage_id": lineage,
+            "source": "test-corpus", "duration_s": 2.0,
+            "user_vad": user, "assistant_vad": assistant,
+        })
+        manifest_rows.append({
             "context": "joint_silence", "elapsed_s": 0.48,
-            "episode_id": f"episode-{index:03d}",
-            "lineage_id": f"lineage-{index % 30:02d}",
-            "model_cutoff_s": 0.625, "onset_s": 0.145, "right_censored": False,
-            "session_id": f"source-session-{index:03d}", "silence_end_s": 1.75,
-            "source": "test-corpus",
-            "split": "train" if index % 30 < 15 else "development",
-        }
-        for index in range(75)
-    ]
+            "episode_id": f"{session}:00000",
+            "lineage_id": lineage,
+            "model_cutoff_s": 0.625, "onset_s": 0.145, "right_censored": resume is None,
+            "session_id": session, "silence_end_s": 2.0 if resume is None else resume,
+            "source": "test-corpus", "split": lineage_splits[lineage],
+        })
     if manifest_updates:
         manifest_rows[0].update(manifest_updates)
+    vad_payload = _jsonl(vad_rows)
+    (tmp_path / "vad.jsonl").write_bytes(vad_payload)
     manifest_payload = _jsonl(manifest_rows)
     manifest = tmp_path / "manifest.pilot.jsonl"
     manifest.write_bytes(manifest_payload)
+    splits_payload = (json.dumps({
+        "schema": "semantic-silence-config/v1",
+        "protocol_version": "semantic-silence-pilot/v1",
+        "split_seed": 20261009,
+        "lineages": lineage_splits,
+    }, indent=2, sort_keys=True) + "\n").encode()
+    (tmp_path / "manifest.splits.json").write_bytes(splits_payload)
     lock = tmp_path / "manifest.jsonl.lock.json"
     lock.write_bytes(receipt_bytes(sign_receipt({
         "schema": "semantic-silence-config/v1",
         "protocol_version": "semantic-silence-pilot/v1",
         "label_schema": "semantic-silence-labels/v1",
         "sha256": {
-            "input_vad": "1" * 64,
+            "input_vad": hashlib.sha256(vad_payload).hexdigest(),
             "full_manifest": "2" * 64,
-            "splits": "3" * 64,
+            "splits": hashlib.sha256(splits_payload).hexdigest(),
             "pilot_manifest": hashlib.sha256(manifest_payload).hexdigest(),
             "config": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
             "protocol_doc": hashlib.sha256(PROTOCOL.read_bytes()).hexdigest(),
@@ -211,7 +273,8 @@ def test_renders_separate_frame_exact_signed_packages(tmp_path: Path) -> None:
         "assistant_channel": 0, "session_id": "source-session-000", "user_channel": 1,
         "wav_sha256": mapping[0]["wav_sha256"],
     }
-    assert mapping[0]["lineage_id"] == "lineage-00"
+    assert mapping[0].get("sample_rate") is None  # Added later to assignment metadata from signed render records.
+    assert mapping[0]["lineage_id"].startswith("lineage-")
 
 
 def test_media_hash_and_post_read_mutation_are_rejected(tmp_path: Path, monkeypatch) -> None:
@@ -437,6 +500,33 @@ def test_renderer_and_assignment_receipts_must_authenticate(tmp_path: Path) -> N
         )
 
 
+def test_assignments_reject_signed_noninteger_render_rate(tmp_path: Path) -> None:
+    prefix, coordinator, annotators, key, audition_path = _assignment_inputs(tmp_path)
+    render_path = coordinator / "render_records.jsonl"
+    rows = _rows(render_path)
+    rows[0]["sample_rate"] = float(rows[0]["sample_rate"])
+    render_path.write_bytes(_jsonl(rows))
+
+    renderer_path = coordinator / "renderer_receipt.json"
+    renderer = json.loads(renderer_path.read_text())
+    renderer.pop("hmac_sha256")
+    renderer.pop("key_fingerprint")
+    renderer["outputs"]["render_records.jsonl"] = hashlib.sha256(render_path.read_bytes()).hexdigest()
+    renderer_path.write_bytes(receipt_bytes(sign_receipt(renderer, key.read_bytes())))
+
+    audition = json.loads(audition_path.read_text())
+    audition.pop("hmac_sha256")
+    audition.pop("key_fingerprint")
+    audition["sha256"]["renderer_receipt"] = hashlib.sha256(renderer_path.read_bytes()).hexdigest()
+    audition_path.write_bytes(receipt_bytes(sign_receipt(audition, key.read_bytes())))
+
+    with pytest.raises(ValueError, match="authenticated WAV metadata"):
+        build_assignments(
+            prefix, coordinator, annotators, key, audition_path,
+            tmp_path / "bad-rate-public", tmp_path / "bad-rate-private",
+        )
+
+
 def test_release_requires_annotation_hash_signed_receipts_and_aliases(tmp_path: Path) -> None:
     annotator_assignments, coordinator_assignments = _build_assignments(tmp_path)
     key = tmp_path / "hmac.key"
@@ -494,8 +584,9 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
     annotator_root, coordinator_root = _build_assignments(tmp_path)
     key = tmp_path / "hmac.key"
     assignments = _rows(coordinator_root / "private_assignment_source_map.jsonl")
+    actions = ("wait", "ack", "respond", "repair")
     item_actions = {
-        item: ("wait" if index % 2 == 0 else "respond")
+        item: actions[index % len(actions)]
         for index, item in enumerate(sorted({row["item_id"] for row in assignments}))
     }
     responses = []
@@ -548,13 +639,252 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
         report_root / "agreement_receipt.json", key, tmp_path / "adjudicated",
     )
     labels = _rows(labels_root / "adjudicated.jsonl")
-    assert {row["action"] for row in labels} == {"wait", "respond"}
+    assert {row["action"] for row in labels} == {"wait", "ack", "respond", "repair"}
     forbidden = {"episode_id", "session_id", "silence_end_s", "annotator_id", "onset_s"}
     assert all(not forbidden.intersection(row) for row in labels)
-    verify_receipt(
-        json.loads((labels_root / "adjudication_receipt.json").read_text()),
-        key.read_bytes(), "adjudication receipt",
+    adjudication_receipt = json.loads((labels_root / "adjudication_receipt.json").read_text())
+    verify_receipt(adjudication_receipt, key.read_bytes(), "adjudication receipt")
+    assert adjudication_receipt["sha256"]["assignment_receipt"] == hashlib.sha256(
+        (coordinator_root / "assignment_receipt.json").read_bytes()
+    ).hexdigest()
+
+    nested_outcomes = coordinator_root / "nested-outcomes"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        extract_outcomes(
+            tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
+            annotator_root, coordinator_root, key, nested_outcomes, CONFIG,
+        )
+    assert not nested_outcomes.exists()
+
+    outcomes_root = extract_outcomes(
+        tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
+        annotator_root, coordinator_root, key, tmp_path / "outcomes", CONFIG,
     )
+    outcomes = _rows(outcomes_root / "outcomes.jsonl")
+    assert len(outcomes) == 75
+    assert {row["first_event"] for row in outcomes} == {
+        None, "user_resume", "recorded_partner_entry"
+    }
+    tie = next(row for row in outcomes if row["session_id"] == "source-session-002")
+    assert tie["recorded_partner_entry_s"] < tie["user_resume_s"]
+    assert tie["sample_rate"] == 4 and tie["first_event"] == "user_resume"
+    assert tie["recorded_overlap_at_user_resume"] is True
+    assert tie["overlap_duration_s"] == pytest.approx(0.1)
+
+    different_lock = json.loads((tmp_path / "manifest.jsonl.lock.json").read_text())
+    different_lock.pop("hmac_sha256")
+    different_lock.pop("key_fingerprint")
+    different_lock["replacement_lock"] = True
+    different_lock_path = tmp_path / "different-manifest.lock.json"
+    different_lock_path.write_bytes(receipt_bytes(sign_receipt(different_lock, key.read_bytes())))
+    with pytest.raises(ValueError, match="bind this config and manifest lock"):
+        extract_outcomes(
+            tmp_path / "vad.jsonl", different_lock_path, annotator_root, coordinator_root,
+            key, tmp_path / "rejected-different-lock", CONFIG,
+        )
+
+    nested_dataset = outcomes_root / "nested-dataset"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        compile_r2_dataset(
+            labels_root, outcomes_root, annotator_root, coordinator_root,
+            tmp_path / "manifest.splits.json", tmp_path / "manifest.jsonl.lock.json",
+            key, nested_dataset,
+        )
+    assert not nested_dataset.exists()
+
+    dataset = compile_r2_dataset(
+        labels_root, outcomes_root, annotator_root, coordinator_root,
+        tmp_path / "manifest.splits.json", tmp_path / "manifest.jsonl.lock.json",
+        key, tmp_path / "r2-dataset",
+    )
+    causal = [
+        row
+        for split in ("train", "development")
+        for row in _rows(dataset / "causal_labels" / f"{split}.jsonl")
+    ]
+    assert len(causal) == 75
+    assert all(row["sampling_weight"] == 1.0 for row in causal)
+    assert all(row["sampling_weight_identified"] is False for row in causal)
+    assert all(
+        row["action"] in row["action_distribution"]
+        and set(row["action_distribution"]) == {"wait", "ack", "respond", "repair", "unratable"}
+        for row in causal
+    )
+    assert all({"confidence", "tags", "quality"} <= row.keys() for row in causal)
+    assert all(not {"session_id", "episode_id", "annotator_id"} & row.keys() for row in causal)
+    verify_receipt(
+        json.loads((dataset / "dataset_receipt.json").read_text()),
+        key.read_bytes(), "dataset receipt",
+    )
+
+    renderer_root = tmp_path / "coordinator-package"
+    prefix_root = tmp_path / "prefix-package"
+    render = {
+        row["item_id"]: row
+        for row in _rows(renderer_root / "render_records.jsonl")
+        if row["package"] == "prefix"
+    }
+    media_index = {row["item_id"]: row for row in _rows(renderer_root / "coordinator_media_index.jsonl")}
+    items = sorted(row["item_id"] for row in causal)
+    causal_by_item = {row["item_id"]: row for row in causal}
+    frozen_path = tmp_path / "frozen.npz"
+    import numpy as np
+    np.savez(
+        frozen_path,
+        item_id=np.asarray(items),
+        prefix_sha256=np.asarray([media_index[item]["prefix_sha256"] for item in items]),
+        available_at_s=np.asarray([causal_by_item[item]["model_cutoff_s"] for item in items]),
+        model_cutoff_s=np.asarray([causal_by_item[item]["model_cutoff_s"] for item in items]),
+        hidden=np.arange(len(items) * 3, dtype=float).reshape(len(items), 3),
+        hidden_previous=np.arange(len(items) * 3, dtype=float).reshape(len(items), 3) - 1.0,
+        predicted_latent=np.arange(len(items) * 2, dtype=float).reshape(len(items), 2),
+    )
+    renderer_digest = hashlib.sha256((renderer_root / "renderer_receipt.json").read_bytes()).hexdigest()
+    frozen_receipt = tmp_path / "frozen.receipt.json"
+    frozen_receipt.write_bytes(receipt_bytes(sign_receipt({
+        "schema": "semantic-silence-frozen-feature-receipt/v1",
+        "protocol_version": "semantic-silence-pilot/v1",
+        "frozen": True,
+        "causal_input": "authenticated_prefix_clip_only",
+        "model_id": "fake-model",
+        "model_revision": "test-revision",
+        "layer": "layer-1",
+        "checkpoint_sha256": "1" * 64,
+        "extractor_code_sha256": "2" * 64,
+        "feature_npz_sha256": hashlib.sha256(frozen_path.read_bytes()).hexdigest(),
+        "renderer_receipt_sha256": renderer_digest,
+        "config_sha256": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
+        "context_start": "authenticated_render_record_start_frame",
+        "state_reset": "per_prefix_clip",
+        "history_truncation": "renderer_prefix_or_session_start",
+    }, key.read_bytes())))
+    nested_features = prefix_root / "nested-features"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        build_features(
+            dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+            frozen_path, frozen_receipt, key, nested_features, CONFIG,
+        )
+    assert not nested_features.exists()
+
+    feature_package = build_features(
+        dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+        frozen_path, frozen_receipt, key, tmp_path / "r2-features", CONFIG,
+    )
+    with np.load(feature_package / "features.npz", allow_pickle=False) as archive:
+        assert set(("item_id", "source", "energy_change", "sampling_weight_status")) <= set(archive.files)
+        assert np.all(archive["model_cutoff_s"] == 0.625)
+        assert np.all(archive["render_boundary_s"] == 0.75)
+        assert np.all(archive["available_at_s"] <= archive["model_cutoff_s"])
+        assert np.any(archive["history_truncated"] == 1.0)
+        np.testing.assert_allclose(archive["hidden_velocity"], 1.0)
+    second = build_features(
+        dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+        frozen_path, frozen_receipt, key, tmp_path / "r2-features-copy", CONFIG,
+    )
+    assert (feature_package / "features.npz").read_bytes() == (second / "features.npz").read_bytes()
+
+    original_frozen = frozen_path.read_bytes()
+    with frozen_path.open("ab") as handle:
+        handle.write(b"tamper")
+    with pytest.raises(ValueError, match="NPZ hash mismatch"):
+        build_features(
+            dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+            frozen_path, frozen_receipt, key, tmp_path / "tampered-features", CONFIG,
+        )
+    frozen_path.write_bytes(original_frozen)
+    with np.load(frozen_path, allow_pickle=False) as archive:
+        future_arrays = {name: archive[name] for name in archive.files}
+    future_arrays["available_at_s"] = future_arrays["available_at_s"].copy()
+    future_arrays["available_at_s"][0] += 1.0
+    future_path = tmp_path / "future-frozen.npz"
+    np.savez(future_path, **future_arrays)
+    future_lock = json.loads(frozen_receipt.read_text())
+    future_lock.pop("hmac_sha256")
+    future_lock.pop("key_fingerprint")
+    future_lock["feature_npz_sha256"] = hashlib.sha256(future_path.read_bytes()).hexdigest()
+    future_receipt = tmp_path / "future-frozen.receipt.json"
+    future_receipt.write_bytes(receipt_bytes(sign_receipt(future_lock, key.read_bytes())))
+    with pytest.raises(ValueError, match="observes beyond"):
+        build_features(
+            dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+            future_path, future_receipt, key, tmp_path / "future-features", CONFIG,
+        )
+
+    outcome_path = outcomes_root / "outcomes.jsonl"
+    outcome_receipt_path = outcomes_root / "outcomes_receipt.json"
+    original_outcomes, original_outcome_receipt = outcome_path.read_bytes(), outcome_receipt_path.read_bytes()
+
+    def replace_outcomes(rows, target: str) -> None:
+        payload = _jsonl(rows)
+        outcome_path.write_bytes(payload)
+        receipt = json.loads(original_outcome_receipt)
+        receipt.pop("hmac_sha256")
+        receipt["outputs"]["outcomes.jsonl"] = hashlib.sha256(payload).hexdigest()
+        receipt["counts"]["items"] = len(rows)
+        outcome_receipt_path.write_bytes(receipt_bytes(sign_receipt(receipt, key.read_bytes())))
+        with pytest.raises(ValueError, match=target):
+            compile_r2_dataset(
+                labels_root, outcomes_root, annotator_root, coordinator_root,
+                tmp_path / "manifest.splits.json", tmp_path / "manifest.jsonl.lock.json",
+                key, tmp_path / f"rejected-{target.replace(' ', '-')}",
+            )
+        outcome_path.write_bytes(original_outcomes)
+        outcome_receipt_path.write_bytes(original_outcome_receipt)
+
+    future_rows = _rows(outcome_path)
+    future_rows[0]["observed_duration_s"] = 8.1
+    future_rows[0]["administrative_censor_s"] = future_rows[0]["model_cutoff_s"] + 8.1
+    replace_outcomes(future_rows, "observation boundary")
+    wrong_rate_rows = _rows(outcome_path)
+    wrong_rate_rows[0]["sample_rate"] = 100
+    replace_outcomes(wrong_rate_rows, "mixed sample_rate binding")
+    replace_outcomes(_rows(outcome_path)[:-1], "exactly cover")
+    replace_outcomes([*_rows(outcome_path), _rows(outcome_path)[0]], "duplicate item_id")
+
+    splits_path, lock_path = tmp_path / "manifest.splits.json", tmp_path / "manifest.jsonl.lock.json"
+    original_splits, original_lock = splits_path.read_bytes(), lock_path.read_bytes()
+    moved = json.loads(original_splits)
+    moved_lineage = next(iter(moved["lineages"]))
+    moved["lineages"][moved_lineage] = (
+        "development" if moved["lineages"][moved_lineage] == "train" else "train"
+    )
+    moved_payload = (json.dumps(moved, indent=2, sort_keys=True) + "\n").encode()
+    splits_path.write_bytes(moved_payload)
+    moved_lock = json.loads(original_lock)
+    moved_lock.pop("hmac_sha256")
+    moved_lock["sha256"]["splits"] = hashlib.sha256(moved_payload).hexdigest()
+    moved_lock["counts"]["split_lineages"] = dict(sorted(Counter(moved["lineages"].values()).items()))
+    lock_path.write_bytes(receipt_bytes(sign_receipt(moved_lock, key.read_bytes())))
+    moved_outcome_receipt = json.loads(original_outcome_receipt)
+    moved_outcome_receipt.pop("hmac_sha256")
+    moved_outcome_receipt["sha256"]["manifest_lock"] = hashlib.sha256(lock_path.read_bytes()).hexdigest()
+    outcome_receipt_path.write_bytes(receipt_bytes(sign_receipt(moved_outcome_receipt, key.read_bytes())))
+    with pytest.raises(ValueError, match="not chained to this manifest lock"):
+        compile_r2_dataset(
+            labels_root, outcomes_root, annotator_root, coordinator_root,
+            splits_path, lock_path, key, tmp_path / "rejected-split-move",
+        )
+    splits_path.write_bytes(original_splits)
+    lock_path.write_bytes(original_lock)
+    outcome_receipt_path.write_bytes(original_outcome_receipt)
+
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        extract_outcomes(
+            tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
+            annotator_root, coordinator_root, key, outcomes_root, CONFIG,
+        )
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        compile_r2_dataset(
+            labels_root, outcomes_root, annotator_root, coordinator_root,
+            splits_path, lock_path, key, dataset,
+        )
+    with (tmp_path / "vad.jsonl").open("ab") as handle:
+        handle.write(b" ")
+    with pytest.raises(ValueError, match="input_vad SHA-256"):
+        extract_outcomes(
+            tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
+            annotator_root, coordinator_root, key, tmp_path / "tampered-outcomes", CONFIG,
+        )
 
 
 def test_failed_gate_and_all_different_require_new_pilot_or_expert(tmp_path: Path) -> None:

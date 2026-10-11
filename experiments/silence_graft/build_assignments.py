@@ -40,6 +40,7 @@ try:
         _require_ready,
         _reserve,
         _write,
+        _wav_info,
     )
 except ModuleNotFoundError:  # Direct script execution from the repository root.
     from protocol_v1 import load_protocol_v1
@@ -47,6 +48,7 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
     from render_clips import (
         _item_id, _json, _jsonl, _lines,
         _publish_staging, _remove_owned_directory, _remove_ready, _require_ready, _reserve, _write,
+        _wav_info,
     )
 
 _QUEUE_SCHEMA = "semantic-silence-prefix-assignment/v1"
@@ -276,8 +278,12 @@ def build_assignments(
         raise ValueError("renderer receipt requires input hashes")
     for name, digest in hashes.items():
         require_digest(digest, f"renderer receipt sha256.{name}")
-    if hashes.get("config") != _sha256(config_payload) or hashes.get("protocol_doc") != _sha256(protocol_payload):
-        raise ValueError("config or protocol document SHA-256 does not match renderer receipt")
+    if (
+        hashes.get("config") != _sha256(config_payload)
+        or hashes.get("protocol_doc") != _sha256(protocol_payload)
+        or "lock_receipt" not in hashes
+    ):
+        raise ValueError("config, protocol document, or manifest lock is missing from renderer receipt")
 
     prefix_outputs = _verify_output_map(prefix_root, renderer.get("prefix_outputs"), "renderer prefix package")
     coordinator_outputs = _verify_output_map(coordinator_root, renderer.get("outputs"), "renderer coordinator package")
@@ -300,13 +306,19 @@ def build_assignments(
 
     index_path = coordinator_root / "coordinator_media_index.jsonl"
     source_path = coordinator_root / "private_source_mapping.jsonl"
-    index_payload, source_payload = index_path.read_bytes(), source_path.read_bytes()
+    render_path = coordinator_root / "render_records.jsonl"
+    index_payload, source_payload, render_payload = (
+        index_path.read_bytes(), source_path.read_bytes(), render_path.read_bytes()
+    )
     if coordinator_outputs.get("coordinator_media_index.jsonl") != _sha256(index_payload):
         raise ValueError("coordinator media index is not locked by renderer receipt")
     if coordinator_outputs.get("private_source_mapping.jsonl") != _sha256(source_payload):
         raise ValueError("private source mapping is not locked by renderer receipt")
+    if coordinator_outputs.get("render_records.jsonl") != _sha256(render_payload):
+        raise ValueError("render records are not locked by renderer receipt")
 
-    index_rows, source_rows = _jsonl(index_payload, "coordinator media index"), _jsonl(source_payload, "private source mapping")
+    index_rows = _jsonl(index_payload, "coordinator media index")
+    source_rows = _jsonl(source_payload, "private source mapping")
     by_item: dict[str, dict[str, Any]] = {}
     sources: dict[str, dict[str, Any]] = {}
     episodes: dict[str, str] = {}
@@ -324,9 +336,52 @@ def build_assignments(
             raise ValueError("reveal clip is not locked by renderer receipt")
         if row.get("protocol_version") != protocol:
             raise ValueError("media index protocol version does not match config")
-        by_item[item] = {**row, "prefix_path": prefix_path, "reveal_path": reveal_path}
+        prefix_channels, prefix_width, sample_rate, prefix_frames = _wav_info(prefix_path)
+        reveal_channels, reveal_width, reveal_rate, reveal_frames = _wav_info(reveal_path, 1)
+        if (
+            prefix_channels != 2 or reveal_channels != 1 or reveal_rate != sample_rate
+            or reveal_width != prefix_width
+        ):
+            raise ValueError("rendered prefix/reveal WAV channel or sample-rate mismatch")
+        by_item[item] = {
+            **row, "prefix_path": prefix_path, "reveal_path": reveal_path,
+            "sample_rate": sample_rate, "sample_width_bytes": prefix_width,
+            "prefix_frames": prefix_frames, "reveal_frames": reveal_frames,
+        }
+
+    render_bindings: dict[str, set[tuple[str, str]]] = {item: set() for item in by_item}
+    for number, row in enumerate(_jsonl(render_payload, "render records"), 1):
+        item, package, kind = row.get("item_id"), row.get("package"), row.get("kind")
+        if item not in by_item or (package, kind) not in {
+            ("prefix", "prefix"), ("coordinator", "reveal_user")
+        }:
+            raise ValueError(f"render record {number} has an unknown item or role")
+        role = (package, kind)
+        if role in render_bindings[item]:
+            raise ValueError(f"render record {number} duplicates an item role")
+        expected_path = by_item[item]["prefix_clip" if package == "prefix" else "reveal_clip"]
+        expected_hash = by_item[item]["prefix_sha256" if package == "prefix" else "reveal_sha256"]
+        expected_frames = by_item[item]["prefix_frames" if package == "prefix" else "reveal_frames"]
+        start, end = row.get("start_frame"), row.get("end_frame")
+        record_rate, record_width = row.get("sample_rate"), row.get("sample_width_bytes")
+        if (
+            row.get("path") != expected_path or row.get("sha256") != expected_hash
+            or isinstance(record_rate, bool) or not isinstance(record_rate, int)
+            or record_rate != by_item[item]["sample_rate"]
+            or isinstance(record_width, bool) or not isinstance(record_width, int)
+            or record_width != by_item[item]["sample_width_bytes"]
+            or row.get("channels") != (["user", "assistant"] if package == "prefix" else ["user"])
+            or isinstance(start, bool) or not isinstance(start, int)
+            or isinstance(end, bool) or not isinstance(end, int)
+            or start < 0 or end < start or end - start != expected_frames
+        ):
+            raise ValueError(f"render record {number} does not match authenticated WAV metadata")
+        render_bindings[item].add(role)
+    if any(roles != {("prefix", "prefix"), ("coordinator", "reveal_user")} for roles in render_bindings.values()):
+        raise ValueError("render records do not exactly cover every item role")
 
     session_bindings: dict[str, dict[str, Any]] = {}
+    session_rates: dict[str, int] = {}
     session_scope: dict[str, tuple[str, str, str]] = {}
     lineage_bindings: dict[str, tuple[str, str]] = {}
     lineage_counts: Counter[str] = Counter()
@@ -335,6 +390,7 @@ def build_assignments(
         required_strings = ("episode_id", "source", "lineage_id", "session_id", "split")
         if item not in by_item or item in sources:
             raise ValueError(f"private source mapping row {number} has unknown or duplicate item_id")
+        row = {**row, "sample_rate": by_item[item]["sample_rate"]}
         if any(not isinstance(row.get(field), str) or not row[field] for field in required_strings):
             raise ValueError(f"private source mapping row {number} requires source and lineage identity")
         if row.get("split") not in annotation["pilot_splits"]:
@@ -343,9 +399,12 @@ def build_assignments(
         cutoff = row.get("model_cutoff_s")
         if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)):
             raise ValueError(f"private source mapping row {number} requires model_cutoff_s")
-        for field in ("user_channel", "assistant_channel"):
-            if isinstance(row.get(field), bool) or not isinstance(row.get(field), int):
-                raise ValueError(f"private source mapping row {number} requires integer {field}")
+        for field in ("user_channel", "assistant_channel", "sample_rate"):
+            if (
+                isinstance(row.get(field), bool) or not isinstance(row.get(field), int)
+                or (field == "sample_rate" and row[field] <= 0)
+            ):
+                raise ValueError(f"private source mapping row {number} requires valid integer {field}")
         if not hmac.compare_digest(item, _item_id(key, row["episode_id"], float(cutoff))):
             raise ValueError("item ID does not match private HMAC key and source mapping")
         binding = {
@@ -353,8 +412,8 @@ def build_assignments(
             "user_channel": row["user_channel"], "wav_sha256": row["wav_sha256"],
         }
         previous = session_bindings.setdefault(row["session_id"], binding)
-        if previous != binding:
-            raise ValueError("private source mapping has inconsistent session channel bindings")
+        if previous != binding or session_rates.setdefault(row["session_id"], row["sample_rate"]) != row["sample_rate"]:
+            raise ValueError("private source mapping has inconsistent session channel/sample-rate bindings")
         scope = (row["source"], row["lineage_id"], row["split"])
         if session_scope.setdefault(row["session_id"], scope) != scope:
             raise ValueError("private source mapping has inconsistent session source/lineage/split binding")
@@ -523,10 +582,12 @@ def build_assignments(
         "outputs": coordinator_output_hashes,
         "protocol_version": protocol,
         "schema": _RECEIPT_SCHEMA,
+        "capabilities": ["sample-grid-outcomes/v1"],
         "sha256": {
             "annotator_ids": _sha256(annotator_payload), "audition_receipt": _sha256(audition_payload),
             "config": _sha256(config_payload), "coordinator_media_index": _sha256(index_payload),
             "protocol_doc": _sha256(protocol_payload), "renderer_receipt": _sha256(renderer_payload),
+            "manifest_lock": hashes["lock_receipt"],
             **({"sentinel_list": _sha256(sentinel_payload)} if sentinel_payload is not None else {}),
         },
     }, key)
