@@ -86,7 +86,19 @@ requires a configured probability threshold for consecutive frames. Any user
 or assistant activity resets it to LISTEN. This is a deterministic replay
 component, not a learned controller and not yet a Moshi actuator.
 
+## Frozen-probe screening
+
+`experiments/silence_graft/train_probe.py` compares acoustic/duration, frozen
+hidden state, hidden velocity, predicted latent, and available negative-control
+features using a fixed-width linear probe. It trains on `train`, evaluates
+`development` by default, and bootstraps paired differences by lineage. Input
+archives with `available_at_s > model_cutoff_s` are rejected.
+
+The probe report cannot by itself pass the R2 efficacy gate: acceptable-onset
+and interruption outcomes still require replay. Opening the untouched test
+split requires an explicit flag after the analysis is locked.
+
 ## Explicit exclusions
 
-R1 does not include a neural probe, Moshi token override, residual adapter,
-LoRA, annotation UI, or live decoder. Those are gated by the roadmap.
+The current code does not include a Moshi token override, residual adapter,
+LoRA, annotation UI, or live decoder. Those remain gated by the roadmap.
