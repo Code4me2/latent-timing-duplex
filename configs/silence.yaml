@@ -1,7 +1,14 @@
+schema: semantic-silence-config/v1
+protocol_version: semantic-silence-pilot/v1
+label_schema: semantic-silence-labels/v1
+
 silence:
   checkpoints_s: [0.24, 0.48, 0.96, 2.0, 3.0, 5.0, 10.0]
+  duration_strata_field: checkpoint_elapsed_s
   duration_strata_s: [1.0, 3.0]
-  max_episodes_per_session: 5
+  duration_strata_labels: ["<1s", "1–<3s", ">=3s"]
+  use_realized_duration_for_strata: false
+  max_episodes_per_lineage: 5
   split_seed: 20261009
   gate:
     threshold: 0.6
@@ -10,5 +17,48 @@ silence:
 annotation:
   primary_actions: [wait, ack, respond, repair, unratable]
   annotators_per_item: 3
-  pilot_episodes: [60, 90]
+  pilot_target_episodes: 75
+  pilot_review_range_episodes: [60, 90]
+  pilot_min_lineages: 30
+  pilot_splits: [train, development]
+  pilot_excluded_sets: [test, challenge]
   agreement_gate: 0.80
+  alpha_metric: krippendorff_nominal
+  unratable_for_action_alpha: missing
+  collapse_map:
+    ack: respond
+    wait: wait
+    respond: respond
+    repair: repair
+  collapsed_reliability_requires_new_pilot: true
+  repeat_fraction: 0.05
+  automatic_sentinels: false
+  coordinator_locked_sentinel_list: null
+  agreement_reports:
+    - per_class_positive_agreement
+    - onset_endpoint_disagreement
+    - repeat_consistency
+  bootstrap:
+    unit: lineage
+    seed: 20261009
+    replicates: 10000
+
+pilot_media:
+  audio_only: true
+  prefix_s: 20.0
+  reveal_s: 8.0
+  reveal_channel: user
+  reveal_clip_at_session_end: true
+  boundary_rounding: nearest_sample
+  gain_scope: conversation_or_session
+  gain_db: 0.0
+  transcript: false
+
+acceptable_onset:
+  supervision: normative_interval_censored_assistant_entry
+  recorded_partner_onset: outcome_only
+  user_resumption_tie: cancel_assistant_entry
+
+gates:
+  r1_requires_pilot_agreement_receipt: true
+  test_evaluation_requires_analysis_lock_receipt: true

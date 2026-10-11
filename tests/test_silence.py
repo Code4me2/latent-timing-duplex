@@ -33,6 +33,45 @@ def test_labeling_protocol_locks_prefix_before_reveal() -> None:
     assert "splits by `lineage_id`" in normalized
 
 
+def test_semantic_silence_documentation_lock() -> None:
+    protocol = (ROOT / "docs" / "DATA_LABELING_PROTOCOL.md").read_text()
+    graft = (ROOT / "docs" / "SILENCE_GRAFT.md").read_text()
+    roadmap = (ROOT / "docs" / "RESEARCH_ROADMAP.md").read_text()
+    experiment = (ROOT / "experiments" / "silence_graft" / "README.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    for text in (protocol, graft, roadmap, experiment, readme):
+        assert "R1" in text
+    protocol_line = " ".join(protocol.split())
+    graft_line = " ".join(graft.split())
+    roadmap_line = " ".join(roadmap.split())
+    readme_line = " ".join(readme.split())
+    gate_status = "gate remains open until a real pilot agreement receipt passes"
+    assert gate_status in graft_line and gate_status in readme_line
+    assert "R1 is scaffolded but its gate is open" in roadmap_line
+    assert "analysis-lock receipt" in protocol_line
+    assert "checkpoint elapsed time, never realized silence" in protocol_line
+    assert "Target 75 episodes" in protocol_line
+    assert "60–90" in protocol_line and "at least 30 source lineages" in protocol_line
+    assert "train/development episodes only" in protocol_line
+    assert "fixed 20-second prefix" in protocol_line
+    assert "fixed 8 seconds of the user channel" in protocol_line
+    assert "nearest-sample rounding" in protocol_line
+    assert "gain_db: 0.0" in protocol_line and "show no transcript" in protocol_line
+    assert "ACK     -> RESPOND" in protocol
+    assert "UNRATABLE -> missing for nominal action alpha" in protocol_line
+    assert "cannot be relabeled or reused" in protocol_line
+    assert "nominal Krippendorff's alpha" in protocol_line
+    assert "per-class positive agreement" in protocol_line
+    assert "onset endpoint disagreement" in graft_line
+    assert "Repeat 5%" in graft_line
+    assert "seed `20261009` and 10,000 replicates" in protocol_line
+    assert "Do not insert automatic sentinels" in protocol_line
+    assert "normative, interval-censored assistant-entry supervision" in protocol_line
+    assert "user-resumption/assistant-entry tie" in protocol_line
+    assert "PR #" not in roadmap and "future PR" not in roadmap
+
+
 def _decision(action: SilenceAction, probability: float = 0.8) -> SilenceDecision:
     probabilities = {
         SilenceAction.WAIT: 1.0 - probability,
