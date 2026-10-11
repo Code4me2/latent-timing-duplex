@@ -1,12 +1,37 @@
 """Causal semantic-silence data and gating primitives."""
 
+from .agreement import (
+    assigned_agreement_report,
+    corpus_agreement_reports,
+    elapsed_stratum_agreement_reports,
+    krippendorff_alpha_nominal,
+    lineage_bootstrap_ci,
+    nominal_krippendorff_alpha,
+    onset_endpoint_disagreement,
+    pairwise_confusion,
+    pilot_agreement_report,
+    per_class_positive_agreement,
+    repeat_consistency,
+    unratable_rate,
+)
 from .annotations import ALLOWED_TAGS, load_annotations, parse_annotation
+from .assigned_annotations import (
+    load_assigned_annotations,
+    load_assigned_annotations_bytes,
+    load_assigned_prefix_annotations,
+    parse_assigned_annotation,
+    parse_assigned_prefix_annotation,
+)
 from .episodes import DEFAULT_CHECKPOINTS_S, extract_silence_checkpoints, sample_episodes
 from .gate import SilenceGate
 from .metrics import multiclass_metrics, paired_lineage_bootstrap_delta
 from .probe import SoftmaxProbe, fit_softmax_probe, fixed_width_projection
 from .types import (
+    ASSIGNED_PREFIX_SCHEMA,
+    SILENCE_PILOT_PROTOCOL,
     AcceptableOnset,
+    AssignedPrefixAnnotation,
+    AssignedSilenceAnnotation,
     CausalFeatureRecord,
     GateState,
     SilenceAction,
@@ -19,7 +44,11 @@ from .types import (
 
 __all__ = [
     "ALLOWED_TAGS",
+    "ASSIGNED_PREFIX_SCHEMA",
+    "SILENCE_PILOT_PROTOCOL",
     "AcceptableOnset",
+    "AssignedPrefixAnnotation",
+    "AssignedSilenceAnnotation",
     "CausalFeatureRecord",
     "DEFAULT_CHECKPOINTS_S",
     "GateState",
@@ -31,12 +60,29 @@ __all__ = [
     "SilenceGate",
     "SilenceQuality",
     "SoftmaxProbe",
+    "assigned_agreement_report",
+    "corpus_agreement_reports",
+    "elapsed_stratum_agreement_reports",
     "extract_silence_checkpoints",
     "fit_softmax_probe",
     "fixed_width_projection",
+    "krippendorff_alpha_nominal",
+    "lineage_bootstrap_ci",
     "load_annotations",
+    "load_assigned_annotations",
+    "load_assigned_annotations_bytes",
+    "load_assigned_prefix_annotations",
     "multiclass_metrics",
+    "nominal_krippendorff_alpha",
+    "onset_endpoint_disagreement",
     "paired_lineage_bootstrap_delta",
+    "pairwise_confusion",
+    "pilot_agreement_report",
     "parse_annotation",
+    "parse_assigned_annotation",
+    "parse_assigned_prefix_annotation",
+    "per_class_positive_agreement",
+    "repeat_consistency",
     "sample_episodes",
+    "unratable_rate",
 ]

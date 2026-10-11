@@ -1,6 +1,7 @@
 schema: semantic-silence-config/v1
 protocol_version: semantic-silence-pilot/v1
 label_schema: semantic-silence-labels/v1
+prefix_response_schema: semantic-silence-prefix-response/v1
 
 silence:
   checkpoints_s: [0.24, 0.48, 0.96, 2.0, 3.0, 5.0, 10.0]
@@ -20,6 +21,8 @@ annotation:
   pilot_target_episodes: 75
   pilot_review_range_episodes: [60, 90]
   pilot_min_lineages: 30
+  pilot_min_pairable_fraction: 0.80
+  pilot_min_pairable_lineages: 30
   pilot_splits: [train, development]
   pilot_excluded_sets: [test, challenge]
   agreement_gate: 0.80
@@ -42,6 +45,7 @@ annotation:
     unit: lineage
     seed: 20261009
     replicates: 10000
+    min_valid_fraction: 0.90
 
 pilot_media:
   audio_only: true

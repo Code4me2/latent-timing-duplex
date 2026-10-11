@@ -10,15 +10,15 @@ import json
 import math
 import os
 import shutil
+import stat
 import tempfile
 import wave
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from latent_timing_duplex.config import find_config, repo_root
+from latent_timing_duplex.config import repo_root
 
 try:
     from experiments.silence_graft.receipts import (
@@ -28,17 +28,15 @@ try:
         sha256_bytes,
         sha256_file,
         sign_receipt,
+        verify_receipt,
     )
+    from experiments.silence_graft.protocol_v1 import config_path, parse_protocol_v1
 except ModuleNotFoundError:  # Direct script execution from the repository root.
-    from receipts import read_hmac_key, receipt_bytes, require_digest, sha256_bytes, sha256_file, sign_receipt
+    from receipts import read_hmac_key, receipt_bytes, require_digest, sha256_bytes, sha256_file, sign_receipt, verify_receipt
+    from protocol_v1 import config_path, parse_protocol_v1
 
 _PROTOCOL = "DATA_LABELING_PROTOCOL.md"
 _ALLOWED_SPLITS = {"train", "development"}
-_LOCK_IDENTIFIERS = {
-    "schema": "semantic-silence-config/v1",
-    "protocol_version": "semantic-silence-pilot/v1",
-    "label_schema": "semantic-silence-labels/v1",
-}
 _READY = "READY"
 
 
@@ -104,89 +102,118 @@ def _finite(row: Mapping[str, Any], key: str, where: str) -> float:
 
 
 def _config_path(value: str | Path) -> Path:
-    path = Path(value)
-    return path.resolve() if path.is_file() else find_config(str(value)).resolve()
+    return config_path(value)
 
 
 def _validate_config(payload: bytes, path: Path) -> dict[str, Any]:
-    config = yaml.safe_load(payload)
-    if not isinstance(config, dict):
-        raise ValueError(f"{path} must contain a YAML mapping")
-    for key, value in _LOCK_IDENTIFIERS.items():
-        if config.get(key) != value:
-            raise ValueError(f"config {key} must be exactly {value!r}")
-    if "pilot_media" not in config or not isinstance(config.get("silence"), dict):
-        raise ValueError("config requires pilot_media and silence mappings")
-    expected = {
-        "audio_only": True,
-        "prefix_s": 20.0,
-        "reveal_s": 8.0,
-        "reveal_channel": "user",
-        "reveal_clip_at_session_end": True,
-        "boundary_rounding": "nearest_sample",
-        "gain_scope": "conversation_or_session",
-        "gain_db": 0.0,
-        "transcript": False,
-    }
-    media = config["pilot_media"]
-    if not isinstance(media, dict) or any(media.get(key) != value for key, value in expected.items()):
-        raise ValueError("config pilot_media does not match the locked pilot protocol")
-    checkpoints = config["silence"].get("checkpoints_s")
-    if not isinstance(checkpoints, list) or not checkpoints or any(
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
-        or value <= 0
-        for value in checkpoints
-    ):
-        raise ValueError("config requires finite positive silence checkpoints")
-    return config
+    return parse_protocol_v1(payload, path)
 
 
 def _validate_lock(
     lock: Mapping[str, Any],
     *,
     manifest_payload: bytes,
+    manifest_rows: list[dict[str, Any]],
     config_payload: bytes,
     protocol_payload: bytes,
     config: Mapping[str, Any],
+    key: bytes,
 ) -> None:
+    verify_receipt(lock, key, "manifest lock receipt")
     for field in ("schema", "protocol_version", "label_schema"):
         if field not in lock or lock[field] != config[field]:
             raise ValueError(f"lock receipt {field} does not exactly match config")
     hashes = lock.get("sha256")
-    if not isinstance(hashes, dict):
-        raise ValueError("lock receipt requires sha256")
+    required_hashes = {"input_vad", "config", "protocol_doc", "full_manifest", "pilot_manifest", "splits"}
+    if not isinstance(hashes, dict) or not required_hashes <= hashes.keys():
+        raise ValueError("lock receipt requires all manifest SHA-256 commitments")
+    for field in required_hashes:
+        require_digest(hashes.get(field), f"lock receipt sha256.{field}")
     expected = {
         "pilot_manifest": _sha256(manifest_payload),
         "config": _sha256(config_payload),
         "protocol_doc": _sha256(protocol_payload),
     }
     for field, digest in expected.items():
-        require_digest(hashes.get(field), f"lock receipt sha256.{field}")
         if not hmac.compare_digest(hashes[field], digest):
             raise ValueError(f"{field} SHA-256 does not match lock receipt")
+    counts = lock.get("counts")
+    required_counts = {
+        "input_sessions", "input_lineages", "split_lineages", "full_episodes",
+        "full_checkpoints", "pilot_episodes", "pilot_checkpoints", "pilot_lineages",
+        "pilot_by_source", "pilot_by_elapsed_stratum",
+    }
+    if not isinstance(counts, dict) or not required_counts <= counts.keys():
+        raise ValueError("lock receipt requires all manifest count commitments")
+    scalar_counts = required_counts - {"split_lineages", "pilot_by_source", "pilot_by_elapsed_stratum"}
+    if any(isinstance(counts[name], bool) or not isinstance(counts[name], int) or counts[name] < 0 for name in scalar_counts):
+        raise ValueError("lock receipt count commitments must be non-negative integers")
+    for name in ("split_lineages", "pilot_by_source", "pilot_by_elapsed_stratum"):
+        if not isinstance(counts[name], dict) or any(
+            not isinstance(label, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for label, value in counts[name].items()
+        ):
+            raise ValueError(f"lock receipt counts.{name} is invalid")
+    if (
+        sum(counts["split_lineages"].values()) != counts["input_lineages"]
+        or counts["full_episodes"] > counts["full_checkpoints"]
+        or counts["pilot_episodes"] > counts["pilot_checkpoints"]
+        or sum(counts["pilot_by_source"].values()) != counts["pilot_checkpoints"]
+        or sum(counts["pilot_by_elapsed_stratum"].values()) != counts["pilot_checkpoints"]
+    ):
+        raise ValueError("lock receipt count commitments are inconsistent")
+    boundaries = config["silence"]["duration_strata_s"]
+    labels = config["silence"]["duration_strata_labels"]
+    recomputed = {
+        "pilot_episodes": len({row["episode_id"] for row in manifest_rows}),
+        "pilot_checkpoints": len(manifest_rows),
+        "pilot_lineages": len({row["lineage_id"] for row in manifest_rows}),
+        "pilot_by_source": dict(sorted(Counter(row["source"] for row in manifest_rows).items())),
+        "pilot_by_elapsed_stratum": dict(sorted(Counter(
+            next((label for boundary, label in zip(boundaries, labels) if row["elapsed_s"] < boundary), labels[-1])
+            for row in manifest_rows
+        ).items())),
+    }
+    if any(counts[name] != value for name, value in recomputed.items()):
+        raise ValueError("pilot manifest counts do not match lock receipt")
 
 
 def _validate_manifest(
-    rows: list[dict[str, Any]], *, checkpoints_s: list[float], prefix_s: float
+    rows: list[dict[str, Any]],
+    *,
+    checkpoints_s: list[float],
+    prefix_s: float,
+    item_range: list[int],
+    min_lineages: int,
+    max_per_lineage: int,
 ) -> tuple[list[dict[str, Any]], set[str]]:
     episodes: set[str] = set()
     sessions: set[str] = set()
+    session_bindings: dict[str, tuple[str, str, str]] = {}
+    lineage_bindings: dict[str, tuple[str, str]] = {}
+    lineage_counts: Counter[str] = Counter()
     for number, row in enumerate(rows, 1):
         where = f"pilot manifest row {number}"
         session = _string(row, "session_id", where)
         episode = _string(row, "episode_id", where)
-        _string(row, "source", where)
-        _string(row, "lineage_id", where)
+        source = _string(row, "source", where)
+        lineage = _string(row, "lineage_id", where)
         if episode in episodes:
             raise ValueError(f"duplicate pilot episode_id {episode!r}")
         episodes.add(episode)
         sessions.add(session)
         if row.get("context") != "joint_silence":
             raise ValueError(f"{where} is not joint_silence")
-        if row.get("split") not in _ALLOWED_SPLITS:
+        split = row.get("split")
+        if split not in _ALLOWED_SPLITS:
             raise ValueError(f"{where} is not train/development")
+        session_binding = (source, lineage, split)
+        if session_bindings.setdefault(session, session_binding) != session_binding:
+            raise ValueError(f"session {session!r} has inconsistent source, lineage, or split")
+        lineage_binding = (source, split)
+        if lineage_bindings.setdefault(lineage, lineage_binding) != lineage_binding:
+            raise ValueError(f"lineage {lineage!r} has inconsistent source or split")
+        lineage_counts[lineage] += 1
         onset = _finite(row, "onset_s", where)
         end = _finite(row, "silence_end_s", where)
         cutoff = _finite(row, "model_cutoff_s", where)
@@ -201,6 +228,16 @@ def _validate_manifest(
             raise ValueError(f"{where} has a timing mismatch")
         if "right_censored" in row and not isinstance(row["right_censored"], bool):
             raise ValueError(f"{where} right_censored must be boolean")
+    if not item_range[0] <= len(rows) <= item_range[1]:
+        raise ValueError(
+            f"production pilot requires {item_range[0]}–{item_range[1]} items; found {len(rows)}"
+        )
+    if len(lineage_counts) < min_lineages:
+        raise ValueError(
+            f"production pilot requires at least {min_lineages} lineages; found {len(lineage_counts)}"
+        )
+    if any(count > max_per_lineage for count in lineage_counts.values()):
+        raise ValueError(f"production pilot exceeds {max_per_lineage} items per lineage")
     return rows, sessions
 
 
@@ -298,17 +335,26 @@ def _write(path: Path, payload: bytes) -> None:
     path.chmod(0o600)
 
 
-def _reserve(path: Path) -> Path:
+def _reserve(path: Path) -> tuple[Path, int, tuple[int, int]]:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         path.mkdir(mode=0o700)
         path.chmod(0o700)
     except FileExistsError as error:
         raise FileExistsError(f"refusing to overwrite existing output directory: {path}") from error
+    descriptor = -1
+    identity: tuple[int, int] | None = None
     try:
-        return Path(tempfile.mkdtemp(prefix=f".{path.name}.", dir=path.parent))
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        staging = Path(tempfile.mkdtemp(prefix=f".{path.name}.", dir=path.parent))
+        return staging, descriptor, identity
     except Exception:
-        path.rmdir()
+        if descriptor >= 0:
+            os.close(descriptor)
+        if identity is not None:
+            _remove_owned_directory(path, identity)
         raise
 
 
@@ -320,21 +366,82 @@ def _directory_identity(path: Path) -> tuple[int, int]:
 def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
     try:
         if _directory_identity(path) == identity:
-            shutil.rmtree(path)
-    except FileNotFoundError:
+            path.rmdir()  # Never recursively remove a target an attacker may have replaced.
+    except (FileNotFoundError, OSError):
         pass
 
 
-def _publish_staging(staging: Path, target: Path) -> None:
-    for child in staging.iterdir():
-        os.replace(child, target / child.name)
-    _write(target / _READY, b"ready\n")
-    staging.rmdir()
-    descriptor = os.open(target, os.O_RDONLY)
+def _publish_staging(
+    staging: Path, target: Path, target_fd: int, identity: tuple[int, int]
+) -> None:
+    staging_fd = os.open(staging, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        os.fsync(descriptor)
+        for child in staging.iterdir():
+            os.rename(child.name, child.name, src_dir_fd=staging_fd, dst_dir_fd=target_fd)
+        marker = os.open(
+            _READY, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600, dir_fd=target_fd,
+        )
+        try:
+            os.write(marker, b"ready\n")
+            os.fsync(marker)
+        finally:
+            os.close(marker)
+        os.fsync(target_fd)
+        if _directory_identity(target) != identity:
+            raise RuntimeError("reserved publication target was replaced")
     finally:
-        os.close(descriptor)
+        os.close(staging_fd)
+    staging.rmdir()
+
+
+def _snapshot_wavs(media: Mapping[str, Mapping[str, Any]], root: Path) -> dict[Path, Path]:
+    snapshots: dict[Path, Path] = {}
+    digests: dict[Path, str] = {}
+    identities: dict[tuple[int, int], Path] = {}
+    for row in media.values():
+        source = row["wav_path"]
+        if source not in snapshots:
+            try:
+                source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            except OSError as error:
+                raise ValueError("source WAV must be a readable regular non-symlink file") from error
+            target_fd = -1
+            try:
+                info = os.fstat(source_fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("source WAV must be a regular file")
+                identity = (info.st_dev, info.st_ino)
+                if identity in identities:
+                    original = identities[identity]
+                    snapshots[source], digests[source] = snapshots[original], digests[original]
+                else:
+                    target_fd, target_name = tempfile.mkstemp(prefix="source-", suffix=".wav", dir=root)
+                    os.fchmod(target_fd, 0o600)
+                    digest = hashlib.sha256()
+                    while chunk := os.read(source_fd, 1024 * 1024):
+                        digest.update(chunk)
+                        view = memoryview(chunk)
+                        while view:
+                            view = view[os.write(target_fd, view):]
+                    os.fsync(target_fd)
+                    snapshots[source], digests[source] = Path(target_name), digest.hexdigest()
+                    identities[identity] = source
+            finally:
+                os.close(source_fd)
+                if target_fd >= 0:
+                    os.close(target_fd)
+        if not hmac.compare_digest(digests[source], row["wav_sha256"]):
+            raise ValueError("source WAV SHA-256 mismatch")
+    return snapshots
+
+
+def _remove_ready(target_fd: int) -> None:
+    try:
+        os.unlink(_READY, dir_fd=target_fd)
+        os.fsync(target_fd)
+    except FileNotFoundError:
+        pass
 
 
 def _require_ready(root: Path, where: str) -> None:
@@ -371,36 +478,36 @@ def render_clips(
     config_payload, protocol_payload = config_path.read_bytes(), protocol_path.read_bytes()
     key = read_hmac_key(hmac_key)
     cfg = _validate_config(config_payload, config_path)
-    _validate_lock(
-        _json(lock_payload, "lock receipt"),
-        manifest_payload=manifest_payload,
-        config_payload=config_payload,
-        protocol_payload=protocol_payload,
-        config=cfg,
-    )
     manifest, sessions = _validate_manifest(
         _jsonl(manifest_payload, "pilot manifest"),
         checkpoints_s=[float(value) for value in cfg["silence"]["checkpoints_s"]],
         prefix_s=float(cfg["pilot_media"]["prefix_s"]),
+        item_range=cfg["annotation"]["pilot_review_range_episodes"],
+        min_lineages=cfg["annotation"]["pilot_min_lineages"],
+        max_per_lineage=cfg["silence"]["max_episodes_per_lineage"],
+    )
+    _validate_lock(
+        _json(lock_payload, "lock receipt"),
+        manifest_payload=manifest_payload,
+        manifest_rows=manifest,
+        config_payload=config_payload,
+        protocol_payload=protocol_payload,
+        config=cfg,
+        key=key,
     )
     media = _media_rows(media_payload, sessions)
 
-    initial_hashes: dict[Path, str] = {}
-    for source in media.values():
-        path, expected = source["wav_path"], source["wav_sha256"]
-        actual = initial_hashes.setdefault(path, sha256_file(path))
-        if not hmac.compare_digest(actual, expected):
-            raise ValueError(f"source WAV SHA-256 mismatch: {path}")
-
     prefix_staging: Path | None = None
     coordinator_staging: Path | None = None
+    prefix_fd = coordinator_fd = -1
     prefix_identity: tuple[int, int] | None = None
     coordinator_identity: tuple[int, int] | None = None
+    snapshot_directory = Path(tempfile.mkdtemp(prefix="silence-sources-"))
+    snapshot_directory.chmod(0o700)
     try:
-        prefix_staging = _reserve(prefix_output_dir)
-        prefix_identity = _directory_identity(prefix_output_dir)
-        coordinator_staging = _reserve(coordinator_output_dir)
-        coordinator_identity = _directory_identity(coordinator_output_dir)
+        snapshots = _snapshot_wavs(media, snapshot_directory)
+        prefix_staging, prefix_fd, prefix_identity = _reserve(prefix_output_dir)
+        coordinator_staging, coordinator_fd, coordinator_identity = _reserve(coordinator_output_dir)
         (prefix_staging / "prefix").mkdir()
         (coordinator_staging / "reveal_user").mkdir()
         wavs: dict[Path, tuple[int, int, int, int]] = {}
@@ -412,7 +519,8 @@ def render_clips(
 
         for row in manifest:
             session, source = row["session_id"], media[row["session_id"]]
-            wav_path = source["wav_path"]
+            source_path = source["wav_path"]
+            wav_path = snapshots[source_path]
             if wav_path not in wavs:
                 wavs[wav_path] = _wav_info(wav_path)
             channels, width, rate, frame_count = wavs[wav_path]
@@ -464,12 +572,14 @@ def render_clips(
                 "gain_db": 0.0,
                 "item_id": item,
                 "lineage_id": row["lineage_id"],
+                "onset_s": float(row["onset_s"]),
+                "elapsed_s": float(row["elapsed_s"]),
+                "checkpoint_elapsed_s": float(row["elapsed_s"]),
                 "model_cutoff_s": cutoff_s,
                 "session_id": session,
                 "source": row["source"],
                 "split": row["split"],
                 "user_channel": user,
-                "wav_path": str(wav_path),
                 "wav_sha256": source["wav_sha256"],
             })
             for package, kind, relative, digest, start, end, labels in (
@@ -481,10 +591,6 @@ def render_clips(
                     "kind": kind, "package": package, "path": relative, "sample_rate": rate,
                     "sample_width_bytes": width, "sha256": digest, "start_frame": start,
                 })
-
-        for path, before in initial_hashes.items():
-            if not hmac.compare_digest(sha256_file(path), before):
-                raise ValueError(f"source WAV changed during rendering: {path}")
 
         metadata = {
             "coordinator_media_index.jsonl": _lines(index_rows),
@@ -523,11 +629,19 @@ def render_clips(
             ],
         }, key)
         _write(coordinator_staging / "renderer_receipt.json", receipt_bytes(receipt))
-        _publish_staging(prefix_staging, prefix_output_dir)
+        _publish_staging(prefix_staging, prefix_output_dir, prefix_fd, prefix_identity)
         prefix_staging = None
-        _publish_staging(coordinator_staging, coordinator_output_dir)
+        _publish_staging(coordinator_staging, coordinator_output_dir, coordinator_fd, coordinator_identity)
         coordinator_staging = None
+        os.close(prefix_fd)
+        prefix_fd = -1
+        os.close(coordinator_fd)
+        coordinator_fd = -1
     except Exception:
+        if prefix_fd >= 0:
+            _remove_ready(prefix_fd)
+        if coordinator_fd >= 0:
+            _remove_ready(coordinator_fd)
         if prefix_staging is not None:
             shutil.rmtree(prefix_staging, ignore_errors=True)
         if coordinator_staging is not None:
@@ -537,6 +651,12 @@ def render_clips(
         if coordinator_identity is not None:
             _remove_owned_directory(coordinator_output_dir, coordinator_identity)
         raise
+    finally:
+        if prefix_fd >= 0:
+            os.close(prefix_fd)
+        if coordinator_fd >= 0:
+            os.close(coordinator_fd)
+        shutil.rmtree(snapshot_directory, ignore_errors=True)
     return prefix_output_dir, coordinator_output_dir
 
 

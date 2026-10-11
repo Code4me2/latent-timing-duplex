@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from experiments.silence_graft.train_probe import _load
 from latent_timing_duplex.silence import (
     fit_softmax_probe,
     fixed_width_projection,
@@ -105,3 +107,45 @@ def test_probe_cli_writes_development_report(tmp_path) -> None:
     assert report["evaluation_split"] == "development"
     assert report["test_opened"] is False
     assert "hidden_predicted_latent" in report["results"]
+
+    blocked = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "experiments/silence_graft/train_probe.py"),
+            "--features", str(path),
+            "--output", str(tmp_path / "test-report.json"),
+            "--evaluate-test",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert blocked.returncode != 0
+    assert "analysis-lock receipt" in blocked.stderr
+
+
+def test_probe_archive_rejects_nonfinite_times_and_split_leakage(tmp_path) -> None:
+    base = {
+        "session_id": np.asarray(["s1", "s2"]),
+        "lineage_id": np.asarray(["g1", "g2"]),
+        "split": np.asarray(["train", "development"]),
+        "action": np.asarray(["wait", "respond"]),
+        "context": np.asarray(["joint_silence", "joint_silence"]),
+        "elapsed_s": np.asarray([0.48, 0.48]),
+        "model_cutoff_s": np.asarray([1.0, 1.0]),
+        "available_at_s": np.asarray([1.0, 1.0]),
+        "acoustic": np.ones((2, 1)),
+        "hidden": np.ones((2, 1)),
+    }
+    path = tmp_path / "bad.npz"
+    np.savez(path, **{**base, "elapsed_s": np.asarray([0.48, np.nan])})
+    with pytest.raises(ValueError, match="finite row vector"):
+        _load(path)
+
+    np.savez(path, **{**base, "lineage_id": np.asarray(["g1", "g1"])})
+    with pytest.raises(ValueError, match="lineage split bindings"):
+        _load(path)
+
+    np.savez(path, **{**base, "session_id": np.asarray(["s1", "s1"])})
+    with pytest.raises(ValueError, match="session split bindings"):
+        _load(path)
