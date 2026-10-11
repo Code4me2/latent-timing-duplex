@@ -276,8 +276,12 @@ def build_assignments(
         raise ValueError("renderer receipt requires input hashes")
     for name, digest in hashes.items():
         require_digest(digest, f"renderer receipt sha256.{name}")
-    if hashes.get("config") != _sha256(config_payload) or hashes.get("protocol_doc") != _sha256(protocol_payload):
-        raise ValueError("config or protocol document SHA-256 does not match renderer receipt")
+    if (
+        hashes.get("config") != _sha256(config_payload)
+        or hashes.get("protocol_doc") != _sha256(protocol_payload)
+        or "lock_receipt" not in hashes
+    ):
+        raise ValueError("config, protocol document, or manifest lock is missing from renderer receipt")
 
     prefix_outputs = _verify_output_map(prefix_root, renderer.get("prefix_outputs"), "renderer prefix package")
     coordinator_outputs = _verify_output_map(coordinator_root, renderer.get("outputs"), "renderer coordinator package")
@@ -527,6 +531,7 @@ def build_assignments(
             "annotator_ids": _sha256(annotator_payload), "audition_receipt": _sha256(audition_payload),
             "config": _sha256(config_payload), "coordinator_media_index": _sha256(index_payload),
             "protocol_doc": _sha256(protocol_payload), "renderer_receipt": _sha256(renderer_payload),
+            "manifest_lock": hashes["lock_receipt"],
             **({"sentinel_list": _sha256(sentinel_payload)} if sentinel_payload is not None else {}),
         },
     }, key)

@@ -733,6 +733,14 @@ def adjudicate(
     outputs = lock.get("outputs")
     if not isinstance(outputs, dict) or outputs.get("validated_annotations.jsonl") != _sha256(validated_payload):
         raise ValueError("validated annotations do not exactly match agreement receipt")
+    agreement_hashes = lock.get("sha256")
+    if not isinstance(agreement_hashes, dict):
+        raise ValueError("agreement receipt requires its input hash chain")
+    assignment_hash = require_digest(
+        agreement_hashes.get("assignment_receipt"),
+        "agreement receipt sha256.assignment_receipt",
+    )
+    config_hash = require_digest(agreement_hashes.get("config"), "agreement receipt sha256.config")
     protocol = lock.get("protocol_version")
     if not isinstance(protocol, str) or not protocol:
         raise ValueError("agreement receipt requires protocol_version")
@@ -792,6 +800,8 @@ def adjudicate(
             "sha256": {
                 "agreement_receipt": _sha256(agreement_payload),
                 "validated_annotations": _sha256(validated_payload),
+                "assignment_receipt": assignment_hash,
+                "config": config_hash,
                 **expert_hashes,
             },
             "outputs": {

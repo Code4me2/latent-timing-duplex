@@ -52,6 +52,7 @@ def paired_lineage_bootstrap_delta(
     n_boot: int = 2000,
     seed: int = 20261009,
     statistic: Callable[[np.ndarray, np.ndarray, np.ndarray], float | None] | None = None,
+    min_valid_fraction: float = 0.9,
 ) -> dict[str, float | int | None]:
     """Bootstrap A-B by conversation/podcast lineage, never by frame."""
     y = np.asarray(labels)
@@ -62,6 +63,8 @@ def paired_lineage_bootstrap_delta(
         raise ValueError("labels, predictions, and lineage_ids must align")
     if n_boot < 1:
         raise ValueError("n_boot must be positive")
+    if not 0.0 < min_valid_fraction <= 1.0:
+        raise ValueError("min_valid_fraction must be in (0, 1]")
     unique = np.unique(groups)
     if unique.size < 2:
         raise ValueError("paired bootstrap needs at least two lineages")
@@ -71,7 +74,10 @@ def paired_lineage_bootstrap_delta(
     observed_a = statistic(y, a, classes)
     observed_b = statistic(y, b, classes)
     if observed_a is None or observed_b is None:
-        return {"delta": None, "ci_low": None, "ci_high": None, "n_boot": 0}
+        return {
+            "delta": None, "ci_low": None, "ci_high": None, "n_boot": 0,
+            "n_boot_requested": n_boot, "n_boot_valid": 0, "valid_fraction": 0.0,
+        }
 
     indices = {group: np.flatnonzero(groups == group) for group in unique}
     rng = np.random.default_rng(seed)
@@ -83,11 +89,14 @@ def paired_lineage_bootstrap_delta(
         value_b = statistic(y[take], b[take], classes)
         if value_a is not None and value_b is not None:
             deltas.append(value_a - value_b)
-    if not deltas:
-        return {"delta": observed_a - observed_b, "ci_low": None, "ci_high": None, "n_boot": 0}
+    valid_fraction = len(deltas) / n_boot
+    interval_valid = valid_fraction >= min_valid_fraction
     return {
         "delta": float(observed_a - observed_b),
-        "ci_low": float(np.quantile(deltas, 0.025)),
-        "ci_high": float(np.quantile(deltas, 0.975)),
+        "ci_low": float(np.quantile(deltas, 0.025)) if interval_valid else None,
+        "ci_high": float(np.quantile(deltas, 0.975)) if interval_valid else None,
         "n_boot": len(deltas),
+        "n_boot_requested": n_boot,
+        "n_boot_valid": len(deltas),
+        "valid_fraction": valid_fraction,
     }

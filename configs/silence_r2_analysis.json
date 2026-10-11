@@ -1,0 +1,47 @@
+{
+  "bootstrap": {
+    "minimum_valid_fraction": 0.9,
+    "replicates": 10000,
+    "unit": "lineage_id"
+  },
+  "observational_hazard": {
+    "confirmatory_status": "development_only_exploratory",
+    "bin_edges_s": [
+      0.0,
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      8.0
+    ],
+    "events": [
+      "user_resume",
+      "recorded_partner_entry",
+      "no_event"
+    ],
+    "primary_metric": "mean_item_nll",
+    "tie_rule": "user_resume"
+  },
+  "primary_metric": "macro_auprc",
+  "replay_metrics_status": "required_but_unavailable_until_replay",
+  "required_elapsed_strata_s": {
+    "long": [
+      3.0,
+      null
+    ],
+    "short": [
+      0.0,
+      1.0
+    ]
+  },
+  "schema": "semantic-silence-r2-analysis-config/v1",
+  "thresholds": {
+    "acceptable_onset_hit_rate_improvement_min": 0.05,
+    "macro_auprc_improvement_min": 0.05,
+    "paired_ci_lower_bound_strictly_above": 0.0,
+    "premature_interruption_degradation_max": 0.02
+  }
+}

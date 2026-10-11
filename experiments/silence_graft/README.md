@@ -204,30 +204,131 @@ The model-label output contains only causal item/source/lineage/split timing and
 aggregated annotation targets; raw annotator, episode/session, reveal, and
 outcome fields are excluded.
 
-## R2: screen frozen representations
+## R2: authenticate outcomes and compile post-label data
 
-Create a NumPy `.npz` with aligned arrays:
+Extract the locked eight-second future-observation window from the exact VAD
+bytes committed by the manifest lock:
 
-```text
-session_id, lineage_id, split, action, context, elapsed_s,
-model_cutoff_s, available_at_s, acoustic, hidden
+```bash
+python experiments/silence_graft/extract_outcomes.py \
+  --vad /private/data/two_channel_vad.jsonl \
+  --manifest-lock /private/data/silence_manifest.jsonl.lock.json \
+  --annotator-root /distribution/pilot-assignments \
+  --coordinator-root /private/data/pilot-assignments \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output-dir /private/data/outcomes
 ```
 
-Optional arrays are `hidden_velocity`, `predicted_latent`, `untrained_latent`,
-and `shuffled_target_latent`. The archive is rejected if any feature is
-available after its model cutoff.
+The new-only package contains one deduplicated row per item plus a signed
+receipt. It verifies the original VAD hash, manifest/config/protocol lock,
+exact assignment packages, private item identity, joint silence, protected
+lineage split, and strict post-cutoff event boundaries. User resumption wins an
+exact tie. Recorded partner entry remains outcome metadata, never normative
+supervision.
+
+After authenticated adjudication, compile the private split artifacts:
+
+```bash
+python experiments/silence_graft/compile_r2_dataset.py \
+  --adjudication-root /private/data/adjudicated \
+  --outcomes-root /private/data/outcomes \
+  --annotator-root /distribution/pilot-assignments \
+  --coordinator-root /private/data/pilot-assignments \
+  --manifest-splits /private/data/silence_manifest.splits.json \
+  --manifest-lock /private/data/silence_manifest.jsonl.lock.json \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output-dir /private/data/r2-pilot
+```
+
+The package keeps causal labels, future outcomes, and clearly private joined
+research rows in separate train/development files. Causal-label files contain
+no annotator, episode, or session IDs. Test/challenge rows are rejected and no
+resplitting occurs. Unit weights are emitted only for software compatibility;
+`sampling_weight_identified` is false because deterministic balanced pilot
+selection does not identify inclusion probabilities. Pilot prevalence,
+population calibration, and population hazard incidence are not recoverable.
+All packages are new-only and receive `READY` last.
+
+## R2: assemble and screen exact-cutoff features
+
+Run the frozen extractor separately, using only each authenticated prefix WAV.
+Its HMAC-signed sidecar must use schema
+`semantic-silence-frozen-feature-receipt/v1`, declare the model ID/revision,
+layer, checkpoint and extractor hashes, and bind the renderer receipt and NPZ.
+The NPZ requires `item_id`, `prefix_sha256`, `available_at_s`,
+`model_cutoff_s`, and `hidden`; optional matrices are `hidden_previous`,
+`predicted_latent`, `untrained_latent`, and `shuffled_target_latent`.
+
+```bash
+python experiments/silence_graft/build_features.py \
+  --dataset-root /private/data/r2-pilot \
+  --adjudication-root /private/data/adjudicated \
+  --prefix-root /private/data/pilot-prefix \
+  --renderer-root /private/data/pilot-coordinator \
+  --annotator-root /distribution/pilot-assignments \
+  --assignment-root /private/data/pilot-assignments \
+  --frozen-features /private/data/frozen.npz \
+  --frozen-receipt /private/data/frozen.receipt.json \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output-dir /private/data/r2-features
+```
+
+The builder never loads a model. It computes fixed causal stereo-PCM baselines
+from the signed prefix boundary, rejects missing, duplicate, nonfinite, ragged,
+or future-observing frozen rows, and publishes `features.npz` plus an
+authenticated receipt. It preserves the configured causal checkpoint as `model_cutoff_s`, records signed `end_frame / sample_rate` separately as `render_boundary_s`, and rejects any included sample or frozen feature available after the checkpoint. Configured elapsed time remains the duration-stratum column. Existing regular-
+grid Phase 1 caches are not substitutes.
+
+Development representation screening remains the default:
 
 ```bash
 python experiments/silence_graft/train_probe.py \
-  --features /path/to/locked_features.npz \
-  --output /path/to/development_report.json
+  --features /private/data/r2-features/features.npz \
+  --output /private/data/development-report.json
 ```
 
-The default evaluates only `development`. `--evaluate-test` currently fails closed; enable it only when authenticated analysis-lock receipt verification is implemented. All feature sets use the same fixed-width linear
-softmax probe; uncertainty is paired by `lineage_id`.
+The separate observational competing-risk screen consumes the authenticated
+feature and dataset package roots:
 
-This script is representation screening, not a graft efficacy result. It does
-not satisfy acceptable-onset or interruption gates without replay.
+```bash
+python experiments/silence_graft/train_competing_risk_probe.py \
+  --feature-root /private/data/r2-features \
+  --dataset-root /private/data/r2-pilot \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output /private/data/development-risk-report.json
+```
+
+Before test access, copy the locked `configs/silence_r2_analysis.json` without modification, obtain the coordinator's SHA-256 commitment to the sealed archive, and create the new-only lock:
+
+```bash
+python experiments/silence_graft/create_analysis_lock.py \
+  --features /private/data/r2-features/features.npz \
+  --feature-receipt /private/data/r2-features/feature_receipt.json \
+  --sealed-test-commitment FEATURE_SHA256 \
+  --sealed-test-feature-receipt-commitment FEATURE_RECEIPT_SHA256 \
+  --sealed-test-dataset-receipt-commitment DATASET_RECEIPT_SHA256 \
+  --analysis-config configs/silence_r2_analysis.json \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output /private/data/analysis-lock.json
+```
+
+Test evaluation requires the physically separate archive:
+
+```bash
+python experiments/silence_graft/train_probe.py \
+  --features /private/data/r2-features/features.npz \
+  --evaluate-test --test-features /sealed/features.npz \
+  --test-feature-receipt /sealed/feature_receipt.json \
+  --analysis-lock /private/data/analysis-lock.json \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output /private/data/test-report.json
+```
+
+The lock records the exact analysis-config source-byte hash and coordinator-provided commitments to the sealed test feature, feature receipt, and dataset receipt. Its HMAC, embedded canonical config hash, code hashes, authenticated feature chain, and exact CLI settings are verified before the test feature path is opened or hashed. It also requires identical frozen-extractor and acoustic-recipe provenance across train/development and test. This is an integrity check, not proof of chronology or role separation: the current shared HMAC key lets an authorized holder sign receipts. Confirmatory use therefore still requires external sealed custody and a coordinator-controlled commitment; this repository does not yet provide the independent test-package producer. The stored development feature-receipt, dataset-receipt, and analysis-config source-byte digests are signer attestations checked when the lock is created, not artifacts re-supplied to the evaluator; the embedded canonical config and current feature bytes are rechecked during evaluation. Any non-default classes, seed, width, steps, learning rate, bootstrap count, or primary metric
+passed while creating the lock must be repeated for evaluation. Test rows in
+ordinary features are rejected. Shuffled latents are permuted within split × source ×
+elapsed stratum, with the changed-row fraction reported. This remains
+sample-conditional representation screening, not a graft efficacy result.
 
 Moshi replay remains explicitly deferred until the annotation and
 representation gates pass.

@@ -53,9 +53,15 @@ def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _nonfinite(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value}")
+
+
 def _json(payload: bytes, name: str) -> dict[str, Any]:
     try:
-        value = json.loads(payload.decode("utf-8"), object_pairs_hook=_object)
+        value = json.loads(
+            payload.decode("utf-8"), object_pairs_hook=_object, parse_constant=_nonfinite
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         raise ValueError(f"invalid {name}: {error}") from error
     if not isinstance(value, dict):
@@ -73,7 +79,7 @@ def _jsonl(payload: bytes, name: str) -> list[dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            row = json.loads(line, object_pairs_hook=_object)
+            row = json.loads(line, object_pairs_hook=_object, parse_constant=_nonfinite)
         except (json.JSONDecodeError, ValueError) as error:
             raise ValueError(f"invalid {name} line {line_number}: {error}") from error
         if not isinstance(row, dict):

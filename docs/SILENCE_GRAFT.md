@@ -114,6 +114,22 @@ exactly as `ACK→RESPOND`, `WAIT→WAIT`, `RESPOND→RESPOND`, and `REPAIR→RE
 A failed five-class pilot cannot be reused for collapsed reliability; run a new
 pilot. Do not respond to persistent disagreement by scaling the model.
 
+## Authenticated post-label data
+
+`extract_outcomes.py` reconstructs assigned episodes from the exact VAD bytes
+committed by the manifest lock and observes at most eight seconds after each
+cutoff. It records first user resumption or recorded-partner entry (user wins a
+tie), administrative censoring, and channel overlap. Recorded partner entry is
+outcome-only metadata. `compile_r2_dataset.py` verifies the assignment,
+adjudication, outcome, manifest-lock, and original lineage-split chain, then
+publishes separate train/development causal-label, future-outcome, and private
+joined files. Pilot test/challenge rows are forbidden; no post-label resplitting
+is allowed. Causal-label files contain no annotator, episode, or session IDs.
+
+The deterministic balanced pilot has unit software weights but no identifiable
+inclusion probabilities. Pilot prevalence, population calibration, and
+population hazard incidence therefore remain unrecoverable.
+
 ## Gate simulator
 
 `SilenceGate` starts every joint-silence interval in HOLD. A non-WAIT action
@@ -123,14 +139,28 @@ component, not a learned controller and not yet a Moshi actuator.
 
 ## Frozen-probe screening
 
-`experiments/silence_graft/train_probe.py` compares acoustic/duration, frozen
-hidden state, hidden velocity, predicted latent, and available negative-control
-features using a fixed-width linear probe. It trains on `train`, evaluates
-`development` by default, and bootstraps paired differences by lineage. Input
-archives with nonfinite timing, `available_at_s > model_cutoff_s`, lineage split leakage, or inconsistent session lineage/split bindings are rejected.
+`experiments/silence_graft/build_features.py` verifies the adjudication,
+dataset, assignment, renderer, prefix, config, and external-frozen-feature
+receipt chain. It computes only fixed trailing-window stereo PCM baselines from the rendered prefix, preserves the configured checkpoint as the causal cutoff, records signed `end_frame / sample_rate` separately as the render boundary, rejects samples/features available after the checkpoint, and never loads a model or substitutes a hidden state. The external archive must
+bind each item and prefix hash and declare availability and extractor/model
+provenance; future-observing, missing, duplicate, ragged, or nonfinite rows are
+rejected.
+
+`train_probe.py` compares acoustic/duration, energy-change/onset, frozen hidden state, hidden velocity, predicted latent, and available negative controls using a fixed-width
+linear probe. It trains on `train`, evaluates `development` by default, and
+bootstraps paired differences by lineage. Shuffled latents are permuted within
+split × source × elapsed stratum and report their changed-row fraction.
+`train_competing_risk_probe.py` separately screens observational cause-specific hazards (user resumption or recorded-partner entry, with event-free continuation) in fixed 1 s bins through 8 s, omits partial terminal censor intervals, and compares development log likelihood by paired lineage bootstrap. It is explicitly development-only and exploratory.
+
+`create_analysis_lock.py` signs the train/development feature bytes, feature and
+dataset receipt chain, code hashes, frozen thresholds, feature comparisons,
+metrics, and exact probe/bootstrap settings. Test evaluation requires that
+lock and a physically separate committed archive. The lock HMAC, code/config,
+ordinary feature bytes, and CLI settings are checked before the test path is opened or hashed; ordinary archives containing test rows fail closed. The shared HMAC provides integrity, not role separation or proof of chronology. Confirmatory use still requires external sealed custody, a coordinator-controlled commitment, and an independent test-package producer not yet implemented here.
 
 The probe report cannot by itself pass the R2 efficacy gate: acceptable-onset
-and interruption outcomes still require replay. Test evaluation currently fails closed until authenticated analysis-lock receipt verification is implemented.
+and interruption outcomes still require replay. Pilot prevalence, population
+calibration, and population hazard incidence remain unrecoverable.
 
 ## Explicit exclusions
 
