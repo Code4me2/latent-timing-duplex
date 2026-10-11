@@ -2,9 +2,11 @@
 
 CS 199 · Latent Predictive Objectives for Timing Control · 2026-09-03 PT
 
-**Status:** in-repo scorer + tests. This document is the protocol Spark must
-follow when scoring trained heads. It does **not** report empirical results
-and it does **not** start Phase 2.
+**Status:** frozen Phase 1 scorer protocol + tests. This document does not
+report empirical results or define a supported Phase 2 API. For the later
+realized target and exploratory C0/C1/C2 runs, see
+[CURRENT_STATUS.md](CURRENT_STATUS.md) and
+[PHASE2_EXPLORATORY.md](PHASE2_EXPLORATORY.md).
 
 Phase 0 freeze inputs stay in [PHASE0_INTERIM_FINDINGS.md](PHASE0_INTERIM_FINDINGS.md)
 and [EVAL_PROTOCOL_PHASE0.md](EVAL_PROTOCOL_PHASE0.md). Do not invent NLL / VAP
@@ -43,7 +45,7 @@ invent digits.
 | Bootstrap | conversation/episode-level, B=10000, Efron 2.5 / 97.5 |
 | Eval horizons | `{0.16, 0.32, 0.50, 1.00, 2.00}` s (Phase 0 turn-event grid) |
 | Signals | `jepa:surprise`, `nll:moshi`, `vap:p_shift` (optional `random`) |
-| Phase 2 | **out of scope** |
+| Phase 2 | **out of scope for this protocol/package**; later exploratory receipts are documented separately |
 
 Aggregation: duration-weighted *within* a conversation when a clip is split;
 **unweighted across** conversations/episodes (same unit rule as Phase 0).
@@ -67,6 +69,14 @@ when loading `h12_lam0.01`.
 | 80 ms | 1 | 1 |
 | 1 s | 13 | 12 |
 | 5 s | 63 | 62 |
+
+## Target-semantics note
+
+The generic scorer accepts prediction-error series and does not know how their
+target was produced. The realized Spark series used prediction error against a
+mean of future Moshi `transformer_out` states, not an independent user-audio
+embedding. The `z` notation below is generic; for existing empirical artifacts,
+read `z` as that future hidden-state target. See CURRENT_STATUS.
 
 ## Same-timeline rule
 
@@ -248,7 +258,8 @@ are treated as milliseconds. These are **not** official CANDOR turn labels.
 
 ## Out of scope
 
-- Phase 2 policy fine-tune / unfreezing Moshi or BayLing
+- Supported Phase 2 policy fine-tune / unfreezing Moshi or BayLing (the
+  2026-09-25 exploratory receipts do not alter this protocol)
 - Downloading CANDOR parts 002–034
 - Re-running Phase 0 NLL / VAP jobs
 - GB10 kernel forks or GPU in CI

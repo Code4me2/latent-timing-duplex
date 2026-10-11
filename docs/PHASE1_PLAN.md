@@ -2,9 +2,12 @@
 
 CS 199 · Latent Predictive Objectives for Timing Control · 2026-09-03 PT
 
-**Status:** Phase 1 scaffolding after Phase 0 freeze. Velvet approved starting
-Phase 1. This document is the operational plan for *this* repo. It does **not**
-implement Phase 2 fine-tuning and it does **not** unfreeze Moshi or BayLing.
+**Status:** historical Phase 1 plan after the Phase 0 freeze. Velvet approved
+starting Phase 1. The supported package still does **not** implement Phase 2
+fine-tuning or unfreeze Moshi/BayLing. Later Spark execution diverged from parts
+of this plan; the reconciled record is [CURRENT_STATUS.md](CURRENT_STATUS.md),
+and exploratory C0/C1/C2 receipts are in
+[PHASE2_EXPLORATORY.md](PHASE2_EXPLORATORY.md).
 
 Phase 0 numbers live in [PHASE0_INTERIM_FINDINGS.md](PHASE0_INTERIM_FINDINGS.md).
 Do not copy or invent them here. Comparisons use the equal-length window
@@ -20,12 +23,16 @@ a freeze and is not Phase 2. VAD ≠ gold. Silence/collapse diagnostic
 
 ## Goal
 
-Precompute **frozen-model** hidden states and **target user-chunk embeddings**.
-Train **small predictor heads** (single-digit millions of parameters) to predict
-the next user-chunk embedding from the current hidden state, with an
-**isotropic-Gaussian regularizer** (JEPA-style collapse control). Treat
-prediction error as **latent surprise** and score it on the existing turn-event
-harness against Phase 0 Moshi user-channel NLL and VAP.
+The planned goal was to precompute **frozen-model** hidden states and
+**independent target user-chunk embeddings**, then train **small predictor
+heads** to predict the next user chunk with an isotropic-Gaussian regularizer.
+
+The realized Spark ablation used a different target:
+`mean(transformer_out[t+H:t+2H])`, computed from the same frozen Moshi forward
+pass (LEFT=user, assistant input=silence). Optional user codec targets were
+saved but not used as the primary training target. Therefore existing empirical
+results measure **future hidden-state prediction error**. They must not be
+reported as independent user-audio embedding prediction.
 
 ```
 h_t  = frozen Moshi hidden state at chunk t          (backbone never trained)
@@ -35,8 +42,10 @@ L = ||hat{z} - sg(z)||^2 + λ R_iso(hat{z})
 surprise_t = ||hat{z}_{t+h} - z_{t+h}||^2            → ChunkSignal → harness
 ```
 
-Horizons to ablate: **80 ms, 1 s, 5 s**. Regularization strengths to ablate:
-**λ ∈ {0, 0.1, 1.0, 10.0}**.
+The original planned grid was 80 ms / 1 s / 5 s and λ ∈ {0, 0.1, 1.0,
+10.0}. The realized Spark grid used explicit H ∈ {1,12,62} and λ ∈
+{0,0.01,0.1,1.0}; event evaluation locked H=12, λ=0.01 primary and λ=0
+reference. Keep planned and realized settings distinct.
 
 ## What is in-repo now vs. reserved for Spark
 
@@ -115,7 +124,7 @@ On `spark-61dd`, same flags as Phase 0 NLL (`NO_CUDA_GRAPH=1`,
 `MoshiHiddenStateExtractor` in this repo is the interface. Without local
 weights it raises `WeightsNotBundled`. Tests use `FakeHiddenStateExtractor`.
 
-### 3. Precompute target user-chunk embeddings
+### 3. Precompute target user-chunk embeddings (planned, not realized)
 
 1. For each 80 ms LEFT=user chunk, embed with a **frozen** encoder
    (preferred: Mimi continuous latents already computed during Moshi
@@ -123,6 +132,11 @@ weights it raises `WeightsNotBundled`. Tests use `FakeHiddenStateExtractor`.
 2. Cache `[T, E]` with E=256 (default) next to the hidden-state files
    under `targets/user_chunk/`.
 3. Do not train the target encoder in Phase 1. Stop-grad on `z` in the loss.
+
+The Spark runs instead cached 4096-D future `transformer_out` means under
+`target_h{1,12,62}`. C0 later projected H=12 targets to 256 dimensions with a
+frozen seeded QR matrix. A future experiment must either use the planned Mimi
+target or name the object `future_transformer_state`; do not conflate them.
 
 ### 4. Train small heads (CPU or Spark)
 
@@ -218,10 +232,11 @@ Phase 1 *science* (later, on Spark) is done when:
    — criterion not met (0/57); not a timing win by itself.
 5. Moshi and BayLing weights were never trained.
 
-## Out of scope (do not do in Phase 1)
+## Out of scope for the supported Phase 1 package
 
 - Phase 2: condition the dialogue policy on surprise; fine-tune Moshi /
-  BayLing; LoRA / full FT; generation-time steering.
+  BayLing; LoRA / full FT; generation-time steering. Exploratory C0/C1/C2
+  runs later occurred out-of-tree and are historical receipts, not package API.
 - Unfreezing any backbone “just to see.”
 - Downloading CANDOR parts 002–034.
 - Re-running Phase 0 Spark NLL / VAP jobs.

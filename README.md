@@ -9,9 +9,11 @@
 | Owner | [code4me2](https://github.com/code4me2) |
 | License | Apache-2.0 |
 
-Full-duplex spoken dialogue models (Moshi, SyncLLM, BayLing-Duplex) bury *speak* vs. *listen* inside next-token sampling. This project tests a JEPA-style latent predictor of the next user-audio chunk, and treats prediction error (“surprise”) as an explicit salience signal for the dialogue policy.
+Full-duplex spoken dialogue models (Moshi, SyncLLM, BayLing-Duplex) bury *speak* vs. *listen* inside next-token sampling. This project tests whether predictive latent error (“surprise”) exposes turn timing and, separately, whether a predicted latent can steer generation. The planned user-audio target and the realized future-transformer-state target are kept distinct below.
 
-**This repository is Phase 0 (frozen) plus Phase 1 scaffolding and the Phase 1 turn-event scorer.** It does not download weights or corpora, does not implement Phase 2 policy conditioning, and does not re-run Spark jobs. Phase 0 numbers live in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) — do not invent them. A 10-clip DuplexChat EN slice is also recorded as reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
+**Current index:** [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) (evidence through 2026-09-25). The forward plan is [docs/RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md): a causal silence-state/hazard sidecar followed, only after offline gates, by native silence/no-text gating. Phase 0 is frozen; Phase 1's scorer remains the supported package surface. Later C0/C1/C2 latent-graft runs are preserved as **exploratory receipts**, not a supported Phase 2 API or an efficacy result: [docs/PHASE2_EXPLORATORY.md](docs/PHASE2_EXPLORATORY.md).
+
+This repository does not download weights or corpora and does not re-run Spark jobs. Phase 0 numbers live in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) — do not invent them. A 10-clip DuplexChat EN slice is also recorded as reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
 
 Whether the *implicit* next-token signal is already predictive of turn events is a reportable Phase 0 result, including a negative one.
 
@@ -20,8 +22,8 @@ Whether the *implicit* next-token signal is already predictive of turn events is
 | Phase | Scope | In this repo now |
 |---|---|---|
 | **0** (weeks 1–5) | Inference wrappers, VAP baseline, 200–500 h working subset, eval harness, frozen user-channel NLL | **Frozen.** Synthetic harness, Moshi delay-NaN NLL, CPU VAP, Spark 10-clip reference. Findings: [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md). Protocol: [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md). |
-| **1** | JEPA-style latent predictor on the next user-audio chunk; surprise as salience | **Scaffolding + turn-event scorer.** Plan, CPU head/loss/dataset, and `ltd phase1-eval` (surprise vs Moshi NLL vs VAP on mid-180). Spark RQ2 interim (CANDOR-only proxy first; evening-PT DC channel-energy VAD addendum; pooled EVENT_HORIZON_GRID CIs, no overclaim): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). Silence/collapse diagnostic (null; 0/57; not a timing win): [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md). No Phase 2. See [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md) and [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). |
-| **2** | Condition the dialogue policy on that salience signal | Out of scope. `Phase2OutOfScope` if a caller tries to unfreeze a backbone. |
+| **1** | Predict a future latent; use prediction error as salience | **Scaffolding + turn-event scorer + Spark proxy runs.** The realized Spark target was a future Moshi transformer-state mean, not an independent user-audio embedding. The silence/collapse diagnostic was null (0/57; not a timing win). See [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md), [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md), [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md), [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md), and [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). |
+| **2** | Condition generation on the predicted latent | **Exploratory receipts only.** C0/C1/C2 ran out-of-tree; no efficacy gate passed. The package still raises `Phase2OutOfScope` if a caller tries to unfreeze a backbone. |
 
 Phase 0 is frozen (equal-length windows; prefer fixed-W). Phase 1 trains **small heads only** on frozen Moshi hidden states. Velvet approved starting Phase 1 after that freeze.
 
@@ -44,7 +46,7 @@ Not implemented (intentionally):
 - Accessing or converting CANDOR
 - Re-running Phase 0 Spark jobs
 - Live Moshi hidden-state extract (reserved for `spark-61dd` caches)
-- Phase 2 policy conditioning or backbone fine-tuning
+- Supported Phase 2 policy conditioning or backbone fine-tuning (historical exploratory scripts are receipts only)
 
 ## Model and data ids (honest, not installed)
 
@@ -114,8 +116,9 @@ src/latent_timing_duplex/
   phase1/        JEPA head + turn-event compare (dataset, hidden, targets, loss,
                  train, surprise, labels, series, checkpoint, compare)
 configs/         YAML defaults + spark_slice.yaml + phase1.yaml
-docs/            SPARK.md, Phase 0 freeze, PHASE1_PLAN.md, EVAL_PROTOCOL_PHASE1.md,
-                 PHASE1_RQ2_INTERIM.md, PHASE1_SILENCE_COLLAPSE.md
+docs/            CURRENT_STATUS.md, frozen protocols/findings, Phase 1 null diagnostics,
+                 exploratory Phase 2 note
+experiments/      exact exploratory script receipts; no weights/audio/checkpoints
 tests/           harness, delay-NaN NLL, VAP pooling, Spark reference, Phase 1 shapes/losses/compare
 ```
 
@@ -125,7 +128,7 @@ Local `./data`, `./weights`, and `./cache` are gitignored. Create them yourself 
 
 Phase 0 asked whether frozen user-channel NLL (and VAP) already predict turn events. That work is **frozen**: equal-length windows, documented slices, no invented digits. Read [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) and [docs/EVAL_PROTOCOL_PHASE0.md](docs/EVAL_PROTOCOL_PHASE0.md) before comparing any new signal to those baselines. Prefer fixed windows (mid-180 primary).
 
-Phase 1 (this repo now) precomputes frozen Moshi hidden states and user-chunk embeddings, then trains a **small** predictor head (single-digit millions of params) with a JEPA-style isotropic-Gaussian regularizer. Surprise is the per-chunk prediction error and plugs into the same harness. Moshi / BayLing stay frozen. Operational steps, Spark paths (`/home/velvet/cs199-*`), ablations, and success criteria: [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). Turn-event protocol (mid-180, seed `20260903`, H∈{1,12,62}, λ=0.01 primary / λ=0 reference): [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). Spark primary numbers and caveats (CANDOR-only proxy n=44 first; evening-PT pooled n≈56 channel-energy VAD addendum): [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md). Silence/collapse on 57 mid-180 sessions (channel-energy masks; criterion not met, 0/57): [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md). Do not upgrade either note into a gold-label, Phase 2, or timing-win claim.
+The Phase 1 scaffold supports frozen hidden states plus a target-embedding interface. The realized Spark ablation instead trained on future Moshi transformer-state means; this distinction is locked in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md). Surprise is the per-chunk prediction error and plugs into the same harness. Moshi / BayLing stayed frozen. Operational steps and historical intent: [docs/PHASE1_PLAN.md](docs/PHASE1_PLAN.md). Turn-event protocol (mid-180, seed `20260903`, explicit Spark H∈{1,12,62}, λ=0.01 primary / λ=0 reference): [docs/EVAL_PROTOCOL_PHASE1.md](docs/EVAL_PROTOCOL_PHASE1.md). The first Spark note remains [docs/PHASE1_RQ2_INTERIM.md](docs/PHASE1_RQ2_INTERIM.md) (CANDOR first, then the historical n≈56 channel-energy VAD proxy pool and pooled `EVENT_HORIZON_GRID` CIs); the expanded proxy result and limitations are indexed in CURRENT_STATUS. Silence/collapse on 57 mid-180 sessions was null (criterion not met, 0/57): [docs/PHASE1_SILENCE_COLLAPSE.md](docs/PHASE1_SILENCE_COLLAPSE.md). Do not upgrade any of these into a gold-label, control, Phase 2, or timing-win claim.
 
 ### Spark: what `ltd phase1-eval` still needs at runtime
 
@@ -142,7 +145,7 @@ This repo **replaces** the ad-hoc `MISSING_HARNESS.md` gap. The scorer and flags
 
 Primary: `--horizon-frames 12 --lambda-reg 0.01 --window-mode mid --window-s 180 --seed 20260903 --bootstrap 10000`. Repeat H∈{1,62} and λ=0. Alias: `ltd phase1 eval …`. Do not claim wins from the table.
 
-Phase 2 (policy conditioning / backbone fine-tune) is **not** started. `freeze_backbone=False` raises `Phase2OutOfScope`.
+The supported package still has no Phase 2 training entry point: `freeze_backbone=False` raises `Phase2OutOfScope`. Exploratory 2026-09-25 latent-graft runs are documented in [docs/PHASE2_EXPLORATORY.md](docs/PHASE2_EXPLORATORY.md), with exact script snapshots under [`experiments/phase2/`](experiments/phase2/). Their execution gates are not efficacy gates.
 
 ## Citation
 

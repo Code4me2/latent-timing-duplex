@@ -3,7 +3,10 @@
 Velvet Reichman · Indika Walimuni · CCSF CS 199 · 2026-09-03 (PT)
 
 ## Status
-**Interim only** (not a Phase 1 freeze, not Phase 2). Primary Spark compare on
+**Historical interim only** (not a Phase 1 freeze, not Phase 2). For the expanded
+DC41 result and later exploratory control work, use
+[CURRENT_STATUS.md](CURRENT_STATUS.md); do not silently replace this receipt's
+original sample or claims. Primary Spark compare on
 `spark-61dd` (Linux aarch64, GB10/`sm_121`) using the in-repo scorer from
 harness [PR #4](https://github.com/Code4me2/latent-timing-duplex/pull/4)
 (`main` @ `c4710a5`). Protocol:
