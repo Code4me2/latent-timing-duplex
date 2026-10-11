@@ -500,11 +500,11 @@ def test_renderer_and_assignment_receipts_must_authenticate(tmp_path: Path) -> N
         )
 
 
-def test_assignments_reject_signed_render_rate_that_disagrees_with_wav(tmp_path: Path) -> None:
+def test_assignments_reject_signed_noninteger_render_rate(tmp_path: Path) -> None:
     prefix, coordinator, annotators, key, audition_path = _assignment_inputs(tmp_path)
     render_path = coordinator / "render_records.jsonl"
     rows = _rows(render_path)
-    rows[0]["sample_rate"] += 1
+    rows[0]["sample_rate"] = float(rows[0]["sample_rate"])
     render_path.write_bytes(_jsonl(rows))
 
     renderer_path = coordinator / "renderer_receipt.json"

@@ -363,10 +363,13 @@ def build_assignments(
         expected_hash = by_item[item]["prefix_sha256" if package == "prefix" else "reveal_sha256"]
         expected_frames = by_item[item]["prefix_frames" if package == "prefix" else "reveal_frames"]
         start, end = row.get("start_frame"), row.get("end_frame")
+        record_rate, record_width = row.get("sample_rate"), row.get("sample_width_bytes")
         if (
             row.get("path") != expected_path or row.get("sha256") != expected_hash
-            or row.get("sample_rate") != by_item[item]["sample_rate"]
-            or row.get("sample_width_bytes") != by_item[item]["sample_width_bytes"]
+            or isinstance(record_rate, bool) or not isinstance(record_rate, int)
+            or record_rate != by_item[item]["sample_rate"]
+            or isinstance(record_width, bool) or not isinstance(record_width, int)
+            or record_width != by_item[item]["sample_width_bytes"]
             or row.get("channels") != (["user", "assistant"] if package == "prefix" else ["user"])
             or isinstance(start, bool) or not isinstance(start, int)
             or isinstance(end, bool) or not isinstance(end, int)
