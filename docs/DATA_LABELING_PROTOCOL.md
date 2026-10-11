@@ -106,7 +106,10 @@ The builder reads all extraction, split, and pilot settings from
 `configs/silence.yaml` (or `--config PATH_OR_NAME`). It writes the full
 manifest, derived `.pilot.jsonl` and `.splits.json` companions, and one
 `.jsonl.lock.json` receipt hashing the input, config, this protocol, and every
-artifact. Existing artifacts are never overwritten. Annotate only
+artifact. The render lock must contain exact schema, protocol, and label-schema
+values plus valid mandatory `pilot_manifest`, `config`, and `protocol_doc`
+SHA-256 digests. Every pilot row requires explicit `source` and `lineage_id`.
+Existing artifacts are never overwritten. Annotate only
 `context == "joint_silence"` rows. Assistant-speaking checkpoints remain
 LISTEN controls.
 
@@ -156,10 +159,12 @@ The pilot is audio-only. Render a fixed 20-second prefix ending exactly at
 - do not trim VAD gaps;
 - do not normalize or otherwise change gain.
 
-Keep source conversation/session gain unchanged (`gain_db: 0.0`). Convert all
-clip boundaries to sample indices with nearest-sample rounding. The interface
-should mark which channel is the prospective user and which is the
-assistant/partner.
+Keep source conversation/session gain unchanged (`gain_db: 0.0`). Round the
+cutoff once to a frame. Round each configured duration to an exact frame count,
+then use `prefix_start = max(0, cutoff - prefix_frames)` and
+`reveal_end = min(total_frames, cutoff + reveal_frames)`. This is the locked
+nearest-sample rounding rule. The interface should mark which channel is the
+prospective user and which is the assistant/partner.
 
 ### 6.2 Reveal clip
 
@@ -171,10 +176,75 @@ never annotation supervision or evidence.
 
 ### 6.3 Assignment and blinding
 
-Randomize items and hide corpus filenames, source IDs, model scores, observed
-outcomes, and other annotators' answers. Avoid assigning adjacent checkpoints
-from one episode consecutively. Record the clip hash and protocol version with
-each response.
+Before queues are built, the coordinator must audition the declared user and
+assistant channels for every pilot session. Each authenticated audition row
+binds `session_id`, source WAV SHA-256, both channel indices, and two explicit
+audition booleans. The receipt also records nonempty auditor identity and a
+zoned ISO-8601 `audited_at`, and hashes the config, renderer receipt,
+coordinator media index, and private source map. Missing, extra, swapped, or
+unsigned coverage blocks assignment.
+
+Render to separate `--prefix-output-dir` and `--coordinator-output-dir` roots.
+The prefix root contains only prefix WAVs and `READY`; reveals, source joins,
+render records, and the authenticated renderer receipt remain under the
+coordinator root. The media index must list exactly the pilot sessions and bind
+each source with lowercase `wav_sha256`. The renderer hashes every source before
+rendering and after all reads. Consumers require both `READY` markers.
+
+Build queues with `experiments/silence_graft/build_assignments.py build`, both
+renderer roots, separate `--annotator-output-dir` and
+`--coordinator-output-dir` targets, a cryptographically random per-pilot HMAC
+key of at least 32 bytes, at least three distinct private annotator IDs, and the
+authenticated audition receipt. The key must be a regular, non-symlink file
+with no group/other permissions (for example mode `0600`); rotate it for each
+pilot and never distribute it to annotators. The targets must not be equal or nested. Exactly three distinct
+annotators receive each item. Assignment loads are deterministically balanced,
+then each queue is randomized with the split seed. Protocol v1 requires an
+exact repeat fraction of 0.05. Repeat 5% of each nonempty base queue, rounded to
+nearest with a minimum of one; a repeat has the same item but new assignment and
+presentation IDs. Avoid adjacent repeats/items and adjacent checkpoints from
+one episode.
+
+The annotator root contains only `annotators/<opaque>/queue.jsonl`, that
+subpackage's presentation-specific prefix media, and root `READY`. Each queue
+may contain only assignment and presentation IDs, a subpackage-relative prefix
+path, schema, and protocol version. It contains no stable media hash. Every
+presentation receives a separate copy, including repeats. Each opaque
+subpackage can be distributed by itself and must not expose item ID,
+repeat/sentinel status, stable source clip paths or hashes, raw annotator
+identity, corpus/source, session, episode, reveal data, model score, outcome,
+or other answers.
+
+The coordinator root contains `private_assignment_source_map.jsonl`,
+`coordinator_reveal_release_map.jsonl`, the authenticated assignment receipt,
+and `READY`, with no copied prefix media. The receipt separately authenticates
+`annotator_outputs` and coordinator `outputs`; consumers require both `READY`
+markers and exact file sets in both roots. Do not generate sentinels. A null
+sentinel config forbids a list. A non-null value must be the exact lowercase
+SHA-256 of a required coordinator list and that digest must also be bound by
+the authenticated audition receipt.
+
+The prefix collector must lock JSONL completion records with an
+HMAC-authenticated receipt hashing both those records and
+`assignment_receipt.json`. Each record carries the exact assignment,
+presentation, annotator, item, and prefix-hash identity tuple plus a lowercase
+`annotation_sha256` for the locked response. `build_assignments.py release`
+requires `--annotator-root`, `--coordinator-root`, and the HMAC key. It verifies
+both ready roots and their exact file sets against the authenticated assignment
+receipt, authenticates the completion receipt, verifies the exact coordinator
+reveal-map hash, and rejects missing, duplicate, unknown, or mismatched rows.
+It emits per-annotator opaque subpackages containing presentation-specific
+reveal copies and queues with only assignment/presentation IDs, a local reveal
+path, schema, and protocol. Reveal hashes remain private; the authenticated
+release receipt binds all emitted bytes. Renderer, assignment, completion, and
+release receipts use canonical HMAC-SHA-256 and include the nonsecret key
+fingerprint.
+
+Package publication reserves each target directory with exclusive mode-`0700`
+`mkdir`, writes files mode `0600`, populates it through staging, writes `READY`
+last, and removes only the same reserved directory identity on ordinary
+failure. Existing targets always win; no check-then-rename overwrite
+window is allowed.
 
 ## 7. Primary decision instructions
 
@@ -380,10 +450,32 @@ semantic-silence-data/
   manifest.pilot.jsonl
   manifest.splits.json
   manifest.jsonl.lock.json
-  clips/
+  pilot-prefix/
     prefix/
+    READY
+  pilot-coordinator/
     reveal_user/
-  assignments/
+    coordinator_media_index.jsonl
+    private_source_mapping.jsonl
+    render_records.jsonl
+    renderer_receipt.json
+    READY
+  assignments-annotator/
+    annotators/<opaque>/
+      queue.jsonl
+      media/prefix/<presentation>.wav
+    READY
+  assignments-coordinator/
+    private_assignment_source_map.jsonl
+    coordinator_reveal_release_map.jsonl
+    assignment_receipt.json
+    READY
+  reveals/
+    annotators/<opaque>/
+      queue.jsonl
+      media/reveal/<presentation>.wav
+    release_receipt.json
+    READY
   annotations/
     raw/
       annotator-a.jsonl
@@ -395,7 +487,12 @@ semantic-silence-data/
 ```
 
 Media, private paths, annotations containing restricted source identifiers, and
-untouched test labels remain outside Git. Commit only schemas, protocol text,
+untouched test labels remain outside Git. Render with
+`experiments/silence_graft/render_clips.py` from the locked pilot manifest and
+receipt, an exact-session absolute-path private media index with source hashes,
+and a private HMAC key of at least 32 bytes. The renderer refuses either
+existing output directory, writes opaque clip names, and records source joins
+only in the coordinator-private mapping. Commit only schemas, protocol text,
 aggregate statistics, and cryptographic receipts permitted by source terms.
 
 ## 16. Handoff acceptance checklist
