@@ -39,9 +39,9 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
 
 _ADJUDICATION_SCHEMA = "semantic-silence-adjudication-receipt/v1"
 _LABEL_SCHEMA = "semantic-silence-causal-model-label/v1"
-_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v1"
-_OUTCOME_RECEIPT_SCHEMA = "semantic-silence-outcomes-receipt/v1"
-_DATASET_RECEIPT_SCHEMA = "semantic-silence-r2-dataset-receipt/v1"
+_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v2"
+_OUTCOME_RECEIPT_SCHEMA = "semantic-silence-outcomes-receipt/v2"
+_DATASET_RECEIPT_SCHEMA = "semantic-silence-r2-dataset-receipt/v2"
 _CAUSAL_SCHEMA = "semantic-silence-r2-causal-label/v1"
 _EXCLUDED_SPLITS = {"test", "challenge"}
 _PILOT_SPLITS = ("train", "development")
@@ -153,6 +153,8 @@ def compile_r2_dataset(
     protocol = assignment_receipt.get("protocol_version")
     if not isinstance(protocol, str) or not protocol:
         raise ValueError("assignment receipt requires protocol_version")
+    if assignment_receipt.get("capabilities") != ["sample-grid-outcomes/v1"]:
+        raise ValueError("assignment package lacks authenticated sample-grid outcome support")
     assignment_rows, _, private_payload, reveal_payload = _load_assignment_map(
         coordinator_root,
         coordinator_outputs,
@@ -257,7 +259,7 @@ def compile_r2_dataset(
         item = row["item_id"]
         metadata = {field: row[field] for field in (
             "item_id", "session_id", "episode_id", "source", "lineage_id", "split",
-            "onset_s", "elapsed_s", "model_cutoff_s",
+            "onset_s", "elapsed_s", "model_cutoff_s", "sample_rate",
         )}
         previous = item_metadata.setdefault(item, metadata)
         if previous != metadata:
@@ -315,7 +317,7 @@ def compile_r2_dataset(
         if not isinstance(item, str) or item not in item_metadata or item in outcomes:
             raise ValueError(f"{where} has unknown or duplicate item_id")
         metadata = item_metadata[item]
-        for field in ("session_id", "episode_id", "source", "lineage_id", "split"):
+        for field in ("session_id", "episode_id", "source", "lineage_id", "split", "sample_rate"):
             if row.get(field) != metadata[field]:
                 raise ValueError(f"{where} has a mixed {field} binding")
         for field in ("onset_s", "model_cutoff_s", "checkpoint_elapsed_s"):

@@ -27,9 +27,9 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
 
 BIN_EDGES_S = np.arange(0.0, 9.0, 1.0)
 CLASSES = np.asarray(["no_event", "user_resume", "recorded_partner_entry"])
-_DATASET_SCHEMA = "semantic-silence-r2-dataset-receipt/v1"
+_DATASET_SCHEMA = "semantic-silence-r2-dataset-receipt/v2"
 _FEATURE_SCHEMA = "semantic-silence-r2-feature-receipt/v1"
-_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v1"
+_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v2"
 
 
 def _finite(value: Any, name: str) -> float:
@@ -397,7 +397,7 @@ def run_screen(
         },
         "bin_edges_s": BIN_EDGES_S.tolist(),
         "censoring": "partial terminal censor intervals omitted; completed no-event intervals retained",
-        "tie_rule": "user resumption wins an equal-time recorded-partner-entry tie",
+        "tie_rule": "user resumption wins when events round to the same source-sample frame",
         "seed": seed,
         "outcomes_without_features": {
             "count": len(omitted_outcomes),

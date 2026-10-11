@@ -16,6 +16,9 @@ from latent_timing_duplex.silence.outcomes import first_observed_event
 def test_first_event_uses_nearest_sample_and_user_wins_only_frame_ties() -> None:
     assert first_observed_event(1.0, 0.99, 4) == ("user_resume", 1.0)
     assert first_observed_event(1.26, 0.99, 4) == ("recorded_partner_entry", 0.99)
+    for values in ((None, 1.0, 0), (None, None, True), (None, float("nan"), 4)):
+        with pytest.raises(ValueError):
+            first_observed_event(*values)
 
 
 def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -> None:
@@ -64,7 +67,7 @@ def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -
     assert comparison["ci_low"] > 0.0
 
     tie = _normalize_outcome({
-        "schema": "semantic-silence-observed-outcome/v1",
+        "schema": "semantic-silence-observed-outcome/v2",
         "observation_horizon_s": 8.0,
         "item_id": "tie",
         "source": "synthetic",
@@ -93,7 +96,7 @@ def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -
     assert item_index.tolist() == [0, 1]  # The censor's incomplete 1–2 s bin is omitted.
 
     invalid_tie = {**{
-        "schema": "semantic-silence-observed-outcome/v1",
+        "schema": "semantic-silence-observed-outcome/v2",
         "observation_horizon_s": 8.0,
         "item_id": "bad-tie",
         "source": "synthetic",

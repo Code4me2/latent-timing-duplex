@@ -12,7 +12,7 @@ bins and paired lineage bootstrap intervals. It is not a pilot result.
 
 ## Synthetic build observations
 
-In the deliberately separable 90-item synthetic check (60 train, 30 development), the hidden representation reduced mean per-item discrete-hazard NLL from **1.1238** to **0.0281** versus the uninformative elapsed+acoustic baseline: improvement **1.0957**, paired lineage-bootstrap 95% interval **[1.0957, 1.0957]** with 10,000 draws. The degenerate interval is expected because every constructed development lineage has the same pattern; it is a deterministic software check, not empirical uncertainty. The runnable test also confirms that user resumption wins an exact tie and that a partially observed terminal censor bin contributes no false event-free label.
+In the deliberately separable 90-item synthetic check (60 train, 30 development), the hidden representation reduced mean per-item discrete-hazard NLL from **1.1238** to **0.0281** versus the uninformative elapsed+acoustic baseline: improvement **1.0957**, paired lineage-bootstrap 95% interval **[1.0957, 1.0957]** with 10,000 draws. The degenerate interval is expected because every constructed development lineage has the same pattern; it is a deterministic software check, not empirical uncertainty. The runnable test also confirms that user resumption wins a nearest-source-sample-frame tie and that a partially observed terminal censor bin contributes no false event-free label.
 
 ## Assumptions
 

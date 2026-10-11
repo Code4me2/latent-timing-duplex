@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from latent_timing_duplex.config import repo_root
+from latent_timing_duplex.silence.outcomes import nearest_frame
 
 try:
     from experiments.silence_graft.receipts import (
@@ -276,7 +277,7 @@ def _media_rows(payload: bytes, pilot_sessions: set[str]) -> dict[str, dict[str,
 
 
 def _nearest_frame(seconds: float, sample_rate: int) -> int:
-    return int(math.floor(seconds * sample_rate + 0.5))
+    return nearest_frame(seconds, sample_rate)
 
 
 def _item_id(key: bytes, episode_id: str, cutoff_s: float) -> str:
@@ -520,7 +521,6 @@ def render_clips(
         index_rows: list[dict[str, Any]] = []
         mapping_rows: list[dict[str, Any]] = []
         render_rows: list[dict[str, Any]] = []
-        sample_rates: dict[str, int] = {}
         seen_items: set[str] = set()
         media_cfg = cfg["pilot_media"]
 
@@ -531,8 +531,6 @@ def render_clips(
             if wav_path not in wavs:
                 wavs[wav_path] = _wav_info(wav_path)
             channels, width, rate, frame_count = wavs[wav_path]
-            if sample_rates.setdefault(session, rate) != rate:
-                raise ValueError(f"inconsistent sample rate for session {session!r}")
             user, assistant = source["user_channel"], source["assistant_channel"]
             if user < 0 or assistant < 0 or user >= channels or assistant >= channels:
                 raise ValueError(f"invalid channel mapping for session {session!r}")
@@ -585,7 +583,6 @@ def render_clips(
                 "elapsed_s": float(row["elapsed_s"]),
                 "checkpoint_elapsed_s": float(row["elapsed_s"]),
                 "model_cutoff_s": cutoff_s,
-                "sample_rate": rate,
                 "session_id": session,
                 "source": row["source"],
                 "split": row["split"],
@@ -631,7 +628,6 @@ def render_clips(
             "sources": [
                 {
                     "assistant_channel": media[session]["assistant_channel"],
-                    "sample_rate": sample_rates[session],
                     "session_id": session,
                     "user_channel": media[session]["user_channel"],
                     "wav_sha256": media[session]["wav_sha256"],

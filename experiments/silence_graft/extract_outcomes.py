@@ -38,8 +38,8 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
     from receipts import read_hmac_key, receipt_bytes, require_digest, require_disjoint_output, sign_receipt, verify_receipt
     from render_clips import _json, _lines
 
-_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v1"
-_RECEIPT_SCHEMA = "semantic-silence-outcomes-receipt/v1"
+_OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v2"
+_RECEIPT_SCHEMA = "semantic-silence-outcomes-receipt/v2"
 _PROTOCOL_DOC = "DATA_LABELING_PROTOCOL.md"
 _EPSILON = 1e-9
 
@@ -128,6 +128,10 @@ def extract_outcomes(
     assignment_receipt = _json(assignment_payload, "assignment receipt")
     if assignment_receipt.get("protocol_version") != cfg["protocol_version"]:
         raise ValueError("assignment receipt protocol does not match config")
+    if assignment_receipt.get("capabilities") != ["sample-grid-outcomes/v1"]:
+        raise ValueError(
+            "assignment package predates sample-grid outcomes; rebuild it from the authenticated renderer package"
+        )
     assignment_hashes = assignment_receipt.get("sha256")
     if (
         not isinstance(assignment_hashes, dict)

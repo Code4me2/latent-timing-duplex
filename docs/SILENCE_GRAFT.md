@@ -118,8 +118,7 @@ pilot. Do not respond to persistent disagreement by scaling the model.
 
 `extract_outcomes.py` reconstructs assigned episodes from the exact VAD bytes
 committed by the manifest lock and observes at most eight seconds after each
-cutoff. It records first user resumption or recorded-partner entry (user wins a
-tie), administrative censoring, and channel overlap. Recorded partner entry is
+cutoff. It records first user resumption or recorded-partner entry (user wins when both round to the same authenticated source-sample frame), administrative censoring, and channel overlap. Recorded partner entry is
 outcome-only metadata. `compile_r2_dataset.py` verifies the assignment,
 adjudication, outcome, manifest-lock, and original lineage-split chain, then
 publishes separate train/development causal-label, future-outcome, and private

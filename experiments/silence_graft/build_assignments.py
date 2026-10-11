@@ -304,13 +304,30 @@ def build_assignments(
 
     index_path = coordinator_root / "coordinator_media_index.jsonl"
     source_path = coordinator_root / "private_source_mapping.jsonl"
-    index_payload, source_payload = index_path.read_bytes(), source_path.read_bytes()
+    render_path = coordinator_root / "render_records.jsonl"
+    index_payload, source_payload, render_payload = (
+        index_path.read_bytes(), source_path.read_bytes(), render_path.read_bytes()
+    )
     if coordinator_outputs.get("coordinator_media_index.jsonl") != _sha256(index_payload):
         raise ValueError("coordinator media index is not locked by renderer receipt")
     if coordinator_outputs.get("private_source_mapping.jsonl") != _sha256(source_payload):
         raise ValueError("private source mapping is not locked by renderer receipt")
+    if coordinator_outputs.get("render_records.jsonl") != _sha256(render_payload):
+        raise ValueError("render records are not locked by renderer receipt")
 
-    index_rows, source_rows = _jsonl(index_payload, "coordinator media index"), _jsonl(source_payload, "private source mapping")
+    index_rows = _jsonl(index_payload, "coordinator media index")
+    source_rows = _jsonl(source_payload, "private source mapping")
+    sample_rates: dict[str, int] = {}
+    for row in _jsonl(render_payload, "render records"):
+        if row.get("package") != "prefix" or row.get("kind") != "prefix":
+            continue
+        item, rate = row.get("item_id"), row.get("sample_rate")
+        if (
+            not isinstance(item, str) or item in sample_rates or isinstance(rate, bool)
+            or not isinstance(rate, int) or rate <= 0
+        ):
+            raise ValueError("render records have invalid item/sample-rate bindings")
+        sample_rates[item] = rate
     by_item: dict[str, dict[str, Any]] = {}
     sources: dict[str, dict[str, Any]] = {}
     episodes: dict[str, str] = {}
@@ -331,14 +348,16 @@ def build_assignments(
         by_item[item] = {**row, "prefix_path": prefix_path, "reveal_path": reveal_path}
 
     session_bindings: dict[str, dict[str, Any]] = {}
+    session_rates: dict[str, int] = {}
     session_scope: dict[str, tuple[str, str, str]] = {}
     lineage_bindings: dict[str, tuple[str, str]] = {}
     lineage_counts: Counter[str] = Counter()
     for number, row in enumerate(source_rows, 1):
         item = row.get("item_id")
         required_strings = ("episode_id", "source", "lineage_id", "session_id", "split")
-        if item not in by_item or item in sources:
+        if item not in by_item or item in sources or item not in sample_rates:
             raise ValueError(f"private source mapping row {number} has unknown or duplicate item_id")
+        row = {**row, "sample_rate": sample_rates[item]}
         if any(not isinstance(row.get(field), str) or not row[field] for field in required_strings):
             raise ValueError(f"private source mapping row {number} requires source and lineage identity")
         if row.get("split") not in annotation["pilot_splits"]:
@@ -356,13 +375,12 @@ def build_assignments(
         if not hmac.compare_digest(item, _item_id(key, row["episode_id"], float(cutoff))):
             raise ValueError("item ID does not match private HMAC key and source mapping")
         binding = {
-            "assistant_channel": row["assistant_channel"], "sample_rate": row["sample_rate"],
-            "session_id": row["session_id"], "user_channel": row["user_channel"],
-            "wav_sha256": row["wav_sha256"],
+            "assistant_channel": row["assistant_channel"], "session_id": row["session_id"],
+            "user_channel": row["user_channel"], "wav_sha256": row["wav_sha256"],
         }
         previous = session_bindings.setdefault(row["session_id"], binding)
-        if previous != binding:
-            raise ValueError("private source mapping has inconsistent session channel bindings")
+        if previous != binding or session_rates.setdefault(row["session_id"], row["sample_rate"]) != row["sample_rate"]:
+            raise ValueError("private source mapping has inconsistent session channel/sample-rate bindings")
         scope = (row["source"], row["lineage_id"], row["split"])
         if session_scope.setdefault(row["session_id"], scope) != scope:
             raise ValueError("private source mapping has inconsistent session source/lineage/split binding")
@@ -531,6 +549,7 @@ def build_assignments(
         "outputs": coordinator_output_hashes,
         "protocol_version": protocol,
         "schema": _RECEIPT_SCHEMA,
+        "capabilities": ["sample-grid-outcomes/v1"],
         "sha256": {
             "annotator_ids": _sha256(annotator_payload), "audition_receipt": _sha256(audition_payload),
             "config": _sha256(config_payload), "coordinator_media_index": _sha256(index_payload),

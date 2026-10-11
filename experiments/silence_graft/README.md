@@ -223,8 +223,9 @@ The new-only package contains one deduplicated row per item plus a signed
 receipt. It verifies the original VAD hash, manifest/config/protocol lock,
 exact assignment packages, private item identity, joint silence, protected
 lineage split, and strict post-cutoff event boundaries. User resumption wins an
-exact tie. Recorded partner entry remains outcome metadata, never normative
-supervision.
+tie on the same nearest source-sample frame. Recorded partner entry remains outcome metadata, never normative supervision.
+
+Post-label outcome extraction requires the assignment receipt capability `sample-grid-outcomes/v1`. Legacy assignment packages remain valid for annotation, but must be deterministically rebuilt from the unchanged authenticated renderer inputs, annotator list, key, and configuration before outcome extraction. Existing raw responses remain joinable because opaque assignment and presentation IDs are deterministic. Outcome and R2 dataset packages use their `/v2` schemas to make the new mandatory sample-grid field explicit.
 
 After authenticated adjudication, compile the private split artifacts:
 

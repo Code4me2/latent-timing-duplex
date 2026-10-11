@@ -270,9 +270,10 @@ def test_renders_separate_frame_exact_signed_packages(tmp_path: Path) -> None:
     assert receipt["key_fingerprint"] == hashlib.sha256(key.read_bytes()).hexdigest()
     assert len(receipt["sources"]) == 75
     assert receipt["sources"][0] == {
-        "assistant_channel": 0, "sample_rate": 4, "session_id": "source-session-000",
-        "user_channel": 1, "wav_sha256": mapping[0]["wav_sha256"],
+        "assistant_channel": 0, "session_id": "source-session-000", "user_channel": 1,
+        "wav_sha256": mapping[0]["wav_sha256"],
     }
+    assert mapping[0].get("sample_rate") is None  # Added later to assignment metadata from signed render records.
     assert mapping[0]["lineage_id"].startswith("lineage-")
 
 
@@ -807,6 +808,9 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
     future_rows[0]["observed_duration_s"] = 8.1
     future_rows[0]["administrative_censor_s"] = future_rows[0]["model_cutoff_s"] + 8.1
     replace_outcomes(future_rows, "observation boundary")
+    wrong_rate_rows = _rows(outcome_path)
+    wrong_rate_rows[0]["sample_rate"] = 100
+    replace_outcomes(wrong_rate_rows, "mixed sample_rate binding")
     replace_outcomes(_rows(outcome_path)[:-1], "exactly cover")
     replace_outcomes([*_rows(outcome_path), _rows(outcome_path)[0]], "duplicate item_id")
 
