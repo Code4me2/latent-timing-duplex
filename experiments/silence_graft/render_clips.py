@@ -285,12 +285,12 @@ def _item_id(key: bytes, episode_id: str, cutoff_s: float) -> str:
     return hmac.new(key, identity, hashlib.sha256).hexdigest()
 
 
-def _wav_info(path: Path) -> tuple[int, int, int, int]:
+def _wav_info(path: Path, minimum_channels: int = 2) -> tuple[int, int, int, int]:
     try:
         with wave.open(str(path), "rb") as source:
             channels, width = source.getnchannels(), source.getsampwidth()
             rate, frames, compression = source.getframerate(), source.getnframes(), source.getcomptype()
-            if compression != "NONE" or channels < 2 or width not in (1, 2, 3, 4) or rate <= 0:
+            if compression != "NONE" or channels < minimum_channels or width not in (1, 2, 3, 4) or rate <= 0:
                 raise ValueError(f"unsupported PCM WAV {path}")
             remaining = frames
             while remaining:

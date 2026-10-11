@@ -128,7 +128,8 @@ def extract_outcomes(
     assignment_receipt = _json(assignment_payload, "assignment receipt")
     if assignment_receipt.get("protocol_version") != cfg["protocol_version"]:
         raise ValueError("assignment receipt protocol does not match config")
-    if assignment_receipt.get("capabilities") != ["sample-grid-outcomes/v1"]:
+    capabilities = assignment_receipt.get("capabilities")
+    if not isinstance(capabilities, list) or "sample-grid-outcomes/v1" not in capabilities:
         raise ValueError(
             "assignment package predates sample-grid outcomes; rebuild it from the authenticated renderer package"
         )

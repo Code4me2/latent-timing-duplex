@@ -500,6 +500,33 @@ def test_renderer_and_assignment_receipts_must_authenticate(tmp_path: Path) -> N
         )
 
 
+def test_assignments_reject_signed_render_rate_that_disagrees_with_wav(tmp_path: Path) -> None:
+    prefix, coordinator, annotators, key, audition_path = _assignment_inputs(tmp_path)
+    render_path = coordinator / "render_records.jsonl"
+    rows = _rows(render_path)
+    rows[0]["sample_rate"] += 1
+    render_path.write_bytes(_jsonl(rows))
+
+    renderer_path = coordinator / "renderer_receipt.json"
+    renderer = json.loads(renderer_path.read_text())
+    renderer.pop("hmac_sha256")
+    renderer.pop("key_fingerprint")
+    renderer["outputs"]["render_records.jsonl"] = hashlib.sha256(render_path.read_bytes()).hexdigest()
+    renderer_path.write_bytes(receipt_bytes(sign_receipt(renderer, key.read_bytes())))
+
+    audition = json.loads(audition_path.read_text())
+    audition.pop("hmac_sha256")
+    audition.pop("key_fingerprint")
+    audition["sha256"]["renderer_receipt"] = hashlib.sha256(renderer_path.read_bytes()).hexdigest()
+    audition_path.write_bytes(receipt_bytes(sign_receipt(audition, key.read_bytes())))
+
+    with pytest.raises(ValueError, match="authenticated WAV metadata"):
+        build_assignments(
+            prefix, coordinator, annotators, key, audition_path,
+            tmp_path / "bad-rate-public", tmp_path / "bad-rate-private",
+        )
+
+
 def test_release_requires_annotation_hash_signed_receipts_and_aliases(tmp_path: Path) -> None:
     annotator_assignments, coordinator_assignments = _build_assignments(tmp_path)
     key = tmp_path / "hmac.key"

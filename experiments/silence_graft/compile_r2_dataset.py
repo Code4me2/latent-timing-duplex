@@ -153,7 +153,8 @@ def compile_r2_dataset(
     protocol = assignment_receipt.get("protocol_version")
     if not isinstance(protocol, str) or not protocol:
         raise ValueError("assignment receipt requires protocol_version")
-    if assignment_receipt.get("capabilities") != ["sample-grid-outcomes/v1"]:
+    capabilities = assignment_receipt.get("capabilities")
+    if not isinstance(capabilities, list) or "sample-grid-outcomes/v1" not in capabilities:
         raise ValueError("assignment package lacks authenticated sample-grid outcome support")
     assignment_rows, _, private_payload, reveal_payload = _load_assignment_map(
         coordinator_root,
