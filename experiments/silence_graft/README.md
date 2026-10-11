@@ -13,16 +13,19 @@ python experiments/silence_graft/build_manifest.py \
   --output /path/to/silence_manifest.jsonl
 ```
 
-Each VAD row needs `session_id`, `duration_s`, and user/assistant interval lists
-such as `user_vad: [[start_s, end_s], ...]`. `lineage_id` should identify the
-source conversation or podcast; it defaults to `session_id`.
+Each VAD row needs explicit `session_id`, `lineage_id`, `source`, `duration_s`,
+and user/assistant interval lists such as
+`user_vad: [[start_s, end_s], ...]`. Pass `--config PATH_OR_NAME` to use a
+non-default config.
 
-The command writes JSONL plus `.lock.json` hashes. Raw media, private paths, and
-annotation exports are not committed. Pilot selection targets 75 episodes
-(review range 60–90) from at least 30 train/development lineages, capped at five
-episodes per lineage; untouched test and challenge items are excluded. Duration
-strata use checkpoint elapsed time (`<1s`, `1–<3s`, `>=3s`), never realized
-silence duration.
+The command writes the full JSONL plus derived `.pilot.jsonl`, `.splits.json`,
+and `.jsonl.lock.json` artifacts, and refuses to overwrite any of them. Raw
+media, private paths, and annotation exports are not committed. Pilot selection
+targets 75 episodes (review range 60–90) from at least 30 train/development
+lineages, capped at five episodes per lineage. It selects one joint-silence
+checkpoint per episode and balances that checkpoint's elapsed-time stratum
+(`<1s`, `1–<3s`, `>=3s`), never realized silence duration. Untouched test and
+challenge lineages are excluded.
 
 Pilot media is audio-only: a 20-second prefix and an 8-second user-only reveal
 clipped at session end, nearest-sample boundaries, conversation/session

@@ -75,10 +75,10 @@ cancels assistant entry.
 ## Pilot and split lock
 
 Target 75 episodes (allowed coordinator review range 60–90) from at least 30
-lineages, balanced across corpus and checkpoint-elapsed-time duration strata,
-with at most five episodes per lineage. Draw only from train/development; the
-untouched test and challenge sets are excluded. Three annotators label every
-item. Lock partitions by `lineage_id` before model training. A source
+lineages, with at most five episodes per lineage. Select one joint-silence
+checkpoint per episode and balance those items across corpus and checkpoint-
+elapsed-time strata. Draw only from train/development; untouched test and
+challenge sets are excluded. Three annotators label every item. Lock partitions by `lineage_id` before model training. A source
 conversation or podcast episode may appear in only one partition.
 
 The pilot is audio-only: fixed 20-second prefix, fixed 8-second user-only reveal
