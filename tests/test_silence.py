@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,18 @@ from latent_timing_duplex.silence import (
     parse_annotation,
     sample_episodes,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_labeling_protocol_locks_prefix_before_reveal() -> None:
+    protocol = (ROOT / "docs" / "DATA_LABELING_PROTOCOL.md").read_text()
+    normalized = " ".join(protocol.split()).lower()
+    assert "future user resumption" in normalized
+    assert "after the primary answer is submitted and locked" in normalized
+    assert "never revise or overwrite the prefix answer" in normalized
+    assert "splits by `lineage_id`" in normalized
 
 
 def _decision(action: SilenceAction, probability: float = 0.8) -> SilenceDecision:
@@ -103,6 +116,8 @@ def test_annotation_schema_accepts_wait_and_rejects_future_contract_errors() -> 
             "checkpoint_elapsed_s": 0.96,
             "annotator": "a1",
             "action": "wait",
+            "confidence": 4,
+            "also_acceptable": ["ack"],
             "tags": ["floor_holding"],
             "acceptable_onset": {
                 "earliest_elapsed_s": None,
@@ -114,6 +129,8 @@ def test_annotation_schema_accepts_wait_and_rejects_future_contract_errors() -> 
         }
     )
     assert row.action is SilenceAction.WAIT
+    assert row.confidence == 4
+    assert row.also_acceptable == (SilenceAction.ACK,)
     with pytest.raises(ValueError, match="cannot precede"):
         parse_annotation(
             {
@@ -129,6 +146,22 @@ def test_annotation_schema_accepts_wait_and_rejects_future_contract_errors() -> 
                 "quality": "clean",
             }
         )
+
+
+def test_unratable_annotation_has_no_onset_target() -> None:
+    row = parse_annotation(
+        {
+            "episode_id": "e1",
+            "checkpoint_elapsed_s": 0.96,
+            "annotator": "a1",
+            "action": "unratable",
+            "tags": ["technical_uncertainty"],
+            "acceptable_onset": None,
+            "quality": "dropout_mute_or_edit",
+            "ratable": False,
+        }
+    )
+    assert row.acceptable_onset is None
 
 
 def test_annotation_loader_rejects_duplicate_annotator(tmp_path) -> None:

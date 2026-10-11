@@ -1,7 +1,9 @@
 # Causal semantic-silence graft protocol
 
 This protocol implements R1 of [RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md).
-It does not claim that silence semantics are already recoverable.
+The operational collection manual is
+[DATA_LABELING_PROTOCOL.md](DATA_LABELING_PROTOCOL.md). It does not claim that
+silence semantics are already recoverable.
 
 ## Unit of analysis
 
@@ -57,10 +59,12 @@ Secondary tags are defined in
 `latent_timing_duplex.silence.annotations.ALLOWED_TAGS`. They are descriptive,
 not additional primary classes.
 
-Annotators may inspect later context to judge the interaction. That context is
-never exported as a model feature. `wait_for_user_resume=true` is mutually
-exclusive with an onset interval; otherwise the earliest acceptable onset must
-not precede the annotated checkpoint.
+The primary action must be submitted from prefix-only context and locked before
+later user audio is revealed. Future context may support separately named
+retrospective tags, but cannot revise the primary action or enter model
+features. `wait_for_user_resume=true` is mutually exclusive with an onset
+interval; otherwise the earliest acceptable onset must not precede the
+annotated checkpoint.
 
 ## Pilot and split lock
 

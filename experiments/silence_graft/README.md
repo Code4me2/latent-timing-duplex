@@ -1,7 +1,8 @@
 # Semantic-silence experiments
 
-This directory follows [the locked protocol](../../docs/SILENCE_GRAFT.md).
-No model-control efficacy result exists yet.
+This directory follows [the locked protocol](../../docs/SILENCE_GRAFT.md) and
+[data-labeling manual](../../docs/DATA_LABELING_PROTOCOL.md). No model-control
+efficacy result exists yet.
 
 ## R1: build a checkpoint manifest
 

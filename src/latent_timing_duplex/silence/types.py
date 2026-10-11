@@ -90,9 +90,13 @@ class SilenceAnnotation:
     annotator: str
     action: SilenceAction
     tags: tuple[str, ...]
-    acceptable_onset: AcceptableOnset
+    acceptable_onset: AcceptableOnset | None
     quality: SilenceQuality
     ratable: bool = True
+    confidence: int | None = None
+    also_acceptable: tuple[SilenceAction, ...] = ()
+    schema: str = "semantic-silence-labels/v1"
+    clip_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not self.episode_id or not self.annotator:
@@ -101,7 +105,22 @@ class SilenceAnnotation:
             raise ValueError("checkpoint_elapsed_s must be non-negative")
         if self.ratable == (self.action is SilenceAction.UNRATABLE):
             raise ValueError("unratable rows must use action='unratable' and vice versa")
-        earliest = self.acceptable_onset.earliest_elapsed_s
+        if self.ratable != (self.acceptable_onset is not None):
+            raise ValueError("ratable rows require onset guidance; unratable rows cannot have it")
+        if self.confidence is not None and not 1 <= self.confidence <= 5:
+            raise ValueError("confidence must be in [1, 5]")
+        if self.action in self.also_acceptable or SilenceAction.UNRATABLE in self.also_acceptable:
+            raise ValueError("also_acceptable must contain distinct ratable alternatives")
+        if self.clip_sha256 is not None and (
+            len(self.clip_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.clip_sha256.lower())
+        ):
+            raise ValueError("clip_sha256 must be a 64-character hexadecimal digest")
+        earliest = (
+            self.acceptable_onset.earliest_elapsed_s
+            if self.acceptable_onset is not None
+            else None
+        )
         if earliest is not None and earliest + 1e-9 < self.checkpoint_elapsed_s:
             raise ValueError("acceptable onset cannot precede the model checkpoint")
 

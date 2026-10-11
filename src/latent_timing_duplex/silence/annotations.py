@@ -30,20 +30,27 @@ def parse_annotation(obj: Mapping[str, Any]) -> SilenceAnnotation:
     if unknown:
         raise ValueError(f"unknown silence tags: {unknown}")
     onset_obj = obj.get("acceptable_onset")
-    if not isinstance(onset_obj, Mapping):
-        raise ValueError("acceptable_onset must be an object")
-    onset = AcceptableOnset(
-        earliest_elapsed_s=_optional_float(onset_obj.get("earliest_elapsed_s")),
-        latest_elapsed_s=_optional_float(onset_obj.get("latest_elapsed_s")),
-        wait_for_user_resume=bool(onset_obj.get("wait_for_user_resume", False)),
-    )
+    if onset_obj is None:
+        onset = None
+    elif isinstance(onset_obj, Mapping):
+        onset = AcceptableOnset(
+            earliest_elapsed_s=_optional_float(onset_obj.get("earliest_elapsed_s")),
+            latest_elapsed_s=_optional_float(onset_obj.get("latest_elapsed_s")),
+            wait_for_user_resume=bool(onset_obj.get("wait_for_user_resume", False)),
+        )
+    else:
+        raise ValueError("acceptable_onset must be an object or null")
     try:
         action = SilenceAction(str(obj["action"]))
         quality = SilenceQuality(str(obj["quality"]))
+        alternatives = tuple(
+            SilenceAction(str(value)) for value in obj.get("also_acceptable", ())
+        )
     except KeyError as exc:
         raise ValueError(f"annotation missing {exc.args[0]!r}") from exc
     except ValueError as exc:
         raise ValueError(f"invalid annotation enum: {exc}") from exc
+    confidence = obj.get("confidence")
     return SilenceAnnotation(
         episode_id=str(obj.get("episode_id", "")),
         checkpoint_elapsed_s=float(obj.get("checkpoint_elapsed_s", -1.0)),
@@ -53,6 +60,12 @@ def parse_annotation(obj: Mapping[str, Any]) -> SilenceAnnotation:
         acceptable_onset=onset,
         quality=quality,
         ratable=bool(obj.get("ratable", True)),
+        confidence=None if confidence is None else int(confidence),
+        also_acceptable=alternatives,
+        schema=str(obj.get("schema", "semantic-silence-labels/v1")),
+        clip_sha256=(
+            None if obj.get("clip_sha256") is None else str(obj["clip_sha256"])
+        ),
     )
 
 
