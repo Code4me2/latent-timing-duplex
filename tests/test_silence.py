@@ -11,6 +11,7 @@ from latent_timing_duplex.silence import (
     CausalFeatureRecord,
     GateState,
     SilenceAction,
+    SilenceCheckpoint,
     SilenceContext,
     SilenceDecision,
     SilenceGate,
@@ -133,8 +134,8 @@ def test_sampling_keeps_whole_episodes_and_is_deterministic() -> None:
         [],
         checkpoints_s=[0.24, 0.48],
     )
-    first = sample_episodes(rows, max_per_session=2, seed=7)
-    second = sample_episodes(rows, max_per_session=2, seed=7)
+    first = sample_episodes(rows, max_per_lineage=2, seed=7)
+    second = sample_episodes(rows, max_per_lineage=2, seed=7)
     assert first == second
     assert len({row.episode_id for row in first}) == 2
     counts = {episode_id: 0 for episode_id in {row.episode_id for row in first}}
@@ -143,9 +144,29 @@ def test_sampling_keeps_whole_episodes_and_is_deterministic() -> None:
     assert set(counts.values()) == {2}
 
 
-def test_acausal_feature_is_rejected() -> None:
+def test_acausal_and_nonfinite_features_are_rejected() -> None:
     with pytest.raises(ValueError, match="acausal"):
         CausalFeatureRecord("e1", 2.0, 2.1, (1.0,), "future-surprise")
+    with pytest.raises(ValueError, match="timestamps must be finite"):
+        CausalFeatureRecord("e1", 2.0, float("nan"), (1.0,), "nan-time")
+    with pytest.raises(ValueError, match="values must be non-empty and finite"):
+        CausalFeatureRecord("e1", 2.0, 2.0, (float("nan"),), "nan-value")
+    for cutoff, available in ((float("nan"), 1.0), (1.0, float("inf"))):
+        with pytest.raises(ValueError, match="finite"):
+            CausalFeatureRecord("e1", cutoff, available, (1.0,), "invalid-time")
+
+
+def test_checkpoint_rejects_non_finite_timestamps() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        SilenceCheckpoint(
+            "s1",
+            "e1",
+            0.0,
+            2.0,
+            float("nan"),
+            1.0,
+            SilenceContext.JOINT,
+        )
 
 
 def test_annotation_schema_accepts_wait_and_rejects_future_contract_errors() -> None:

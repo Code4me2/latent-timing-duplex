@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import random
+import hashlib
+import math
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
@@ -28,11 +29,12 @@ def extract_silence_checkpoints(
     an ordinary LISTEN period. No future observation is placed in model inputs;
     ``silence_end_s`` and ``right_censored`` are outcome metadata only.
     """
-    if duration_s <= 0:
-        raise ValueError("duration_s must be positive")
+    duration_s = float(duration_s)
+    if not math.isfinite(duration_s) or duration_s <= 0:
+        raise ValueError("duration_s must be finite and positive")
     checkpoints = sorted({float(x) for x in checkpoints_s})
-    if not checkpoints or checkpoints[0] <= 0:
-        raise ValueError("checkpoints_s must contain positive values")
+    if not checkpoints or any(not math.isfinite(x) or x <= 0 for x in checkpoints):
+        raise ValueError("checkpoints_s must contain finite positive values")
     user = _merge_intervals(user_intervals, duration_s)
     assistant = _merge_intervals(assistant_intervals, duration_s)
     rows: list[SilenceCheckpoint] = []
@@ -71,25 +73,34 @@ def extract_silence_checkpoints(
 def sample_episodes(
     rows: Sequence[SilenceCheckpoint],
     *,
-    max_per_session: int,
+    max_per_lineage: int,
     seed: int,
 ) -> list[SilenceCheckpoint]:
-    """Deterministically cap whole episodes without dropping their checkpoints."""
-    if max_per_session < 1:
-        raise ValueError("max_per_session must be positive")
+    """Deterministically cap whole episodes across every session in a lineage."""
+    if max_per_lineage < 1:
+        raise ValueError("max_per_lineage must be positive")
     grouped: dict[str, dict[str, list[SilenceCheckpoint]]] = defaultdict(
         lambda: defaultdict(list)
     )
     for row in rows:
-        grouped[row.session_id][row.episode_id].append(row)
+        lineage_id = row.lineage_id or row.session_id
+        episode = grouped[lineage_id][row.episode_id]
+        if episode and episode[0].session_id != row.session_id:
+            raise ValueError(f"episode_id {row.episode_id!r} spans sessions")
+        episode.append(row)
     selected: list[SilenceCheckpoint] = []
-    for session_id in sorted(grouped):
-        episodes = grouped[session_id]
-        ids = sorted(episodes)
-        if len(ids) > max_per_session:
-            rng = random.Random(f"{seed}:{session_id}")
-            ids = sorted(rng.sample(ids, max_per_session))
-        for episode_id in ids:
+    for lineage_id in sorted(grouped):
+        episodes = grouped[lineage_id]
+        ranked = sorted(
+            episodes,
+            key=lambda episode_id: (
+                hashlib.sha256(
+                    f"{seed}:{lineage_id}:{episode_id}".encode()
+                ).digest(),
+                episode_id,
+            ),
+        )[:max_per_lineage]
+        for episode_id in sorted(ranked):
             selected.extend(sorted(episodes[episode_id], key=lambda row: row.elapsed_s))
     return selected
 
@@ -97,15 +108,21 @@ def sample_episodes(
 def _merge_intervals(intervals: Iterable[Interval], duration_s: float) -> list[Interval]:
     cleaned: list[Interval] = []
     for start, end in intervals:
-        a = max(0.0, float(start))
-        b = min(duration_s, float(end))
-        if b > a:
-            cleaned.append((a, b))
+        start, end = float(start), float(end)
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise ValueError("VAD timestamps must be finite")
+        if start < 0 or end > duration_s:
+            raise ValueError("VAD timestamps must lie within the session duration")
+        if start >= end:
+            raise ValueError("VAD interval start must precede end")
+        cleaned.append((start, end))
     cleaned.sort()
     merged: list[list[float]] = []
     for start, end in cleaned:
-        if merged and start <= merged[-1][1] + 1e-9:
-            merged[-1][1] = max(merged[-1][1], end)
+        if merged and start < merged[-1][1]:
+            raise ValueError("within-channel VAD intervals must not overlap")
+        if merged and start == merged[-1][1]:
+            merged[-1][1] = end
         else:
             merged.append([start, end])
     return [(start, end) for start, end in merged]

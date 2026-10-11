@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping
@@ -55,6 +56,16 @@ class SilenceCheckpoint:
     def __post_init__(self) -> None:
         if not self.session_id or not self.episode_id:
             raise ValueError("session_id and episode_id are required")
+        if not all(
+            math.isfinite(value)
+            for value in (
+                self.onset_s,
+                self.silence_end_s,
+                self.model_cutoff_s,
+                self.elapsed_s,
+            )
+        ):
+            raise ValueError("silence timestamps must be finite")
         if self.onset_s < 0 or self.silence_end_s <= self.onset_s:
             raise ValueError("silence interval must have positive duration")
         if not self.onset_s <= self.model_cutoff_s <= self.silence_end_s + 1e-9:
@@ -79,6 +90,10 @@ class AcceptableOnset:
             return
         if self.earliest_elapsed_s is None or self.latest_elapsed_s is None:
             raise ValueError("an onset window requires earliest and latest elapsed seconds")
+        if not math.isfinite(self.earliest_elapsed_s) or not math.isfinite(
+            self.latest_elapsed_s
+        ):
+            raise ValueError("acceptable-onset timestamps must be finite")
         if self.earliest_elapsed_s < 0 or self.latest_elapsed_s < self.earliest_elapsed_s:
             raise ValueError("invalid acceptable-onset window")
 
@@ -101,8 +116,8 @@ class SilenceAnnotation:
     def __post_init__(self) -> None:
         if not self.episode_id or not self.annotator:
             raise ValueError("episode_id and annotator are required")
-        if self.checkpoint_elapsed_s < 0:
-            raise ValueError("checkpoint_elapsed_s must be non-negative")
+        if not math.isfinite(self.checkpoint_elapsed_s) or self.checkpoint_elapsed_s < 0:
+            raise ValueError("checkpoint_elapsed_s must be finite and non-negative")
         if self.ratable == (self.action is SilenceAction.UNRATABLE):
             raise ValueError("unratable rows must use action='unratable' and vice versa")
         if self.ratable != (self.acceptable_onset is not None):
@@ -136,6 +151,10 @@ class CausalFeatureRecord:
     name: str
 
     def __post_init__(self) -> None:
+        if not math.isfinite(self.model_cutoff_s) or not math.isfinite(self.available_at_s):
+            raise ValueError("causal feature timestamps must be finite")
+        if not self.values or any(not math.isfinite(value) for value in self.values):
+            raise ValueError("causal feature values must be non-empty and finite")
         if self.available_at_s > self.model_cutoff_s + 1e-9:
             raise ValueError(
                 f"feature {self.name!r} is acausal: available at "
@@ -150,12 +169,12 @@ class SilenceDecision:
     assistant_entry_hazard: float
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.user_resume_hazard <= 1.0:
-            raise ValueError("user_resume_hazard must be in [0, 1]")
-        if not 0.0 <= self.assistant_entry_hazard <= 1.0:
-            raise ValueError("assistant_entry_hazard must be in [0, 1]")
+        if not math.isfinite(self.user_resume_hazard) or not 0.0 <= self.user_resume_hazard <= 1.0:
+            raise ValueError("user_resume_hazard must be finite and in [0, 1]")
+        if not math.isfinite(self.assistant_entry_hazard) or not 0.0 <= self.assistant_entry_hazard <= 1.0:
+            raise ValueError("assistant_entry_hazard must be finite and in [0, 1]")
         values = [float(v) for v in self.action_probabilities.values()]
-        if not values or any(v < 0.0 or v > 1.0 for v in values):
+        if not values or any(not math.isfinite(v) or v < 0.0 or v > 1.0 for v in values):
             raise ValueError("action probabilities must be non-empty and in [0, 1]")
         if abs(sum(values) - 1.0) > 1e-6:
             raise ValueError("action probabilities must sum to 1")

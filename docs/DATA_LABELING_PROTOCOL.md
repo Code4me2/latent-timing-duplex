@@ -102,9 +102,13 @@ python experiments/silence_graft/build_manifest.py \
   --output /private/data/silence_manifest.jsonl
 ```
 
-The builder writes a companion lock file containing input/output hashes and
-sampling parameters. Annotate only `context == "joint_silence"` rows.
-Assistant-speaking checkpoints remain LISTEN controls.
+The builder reads all extraction, split, and pilot settings from
+`configs/silence.yaml` (or `--config PATH_OR_NAME`). It writes the full
+manifest, derived `.pilot.jsonl` and `.splits.json` companions, and one
+`.jsonl.lock.json` receipt hashing the input, config, this protocol, and every
+artifact. Existing artifacts are never overwritten. Annotate only
+`context == "joint_silence"` rows. Assistant-speaking checkpoints remain
+LISTEN controls.
 
 `silence_end_s` and `right_censored` are outcome metadata. They must not be
 shown during the prefix pass or included in model features.
@@ -123,7 +127,8 @@ Requirements:
 
 - one source conversation/podcast appears in one split only;
 - sample no more than five episodes per `lineage_id`;
-- balance the pilot across corpus and checkpoint-elapsed-time duration strata;
+- select exactly one joint-silence checkpoint per pilot episode and balance those
+  items across corpus and checkpoint-elapsed-time duration strata;
 - draw pilot items only from train and development;
 - retain a natural-prevalence untouched test set;
 - report any long-pause or rare-action enrichment as a separate challenge set;
@@ -316,8 +321,11 @@ predictions as hidden gold answers.
 
 Target 75 episodes, with a coordinator review range of 60–90 episodes, from at
 least 30 source lineages. Use train/development episodes only, cap selection at
-five episodes per lineage, and have three annotators label every selected
-checkpoint. Untouched test and challenge items are excluded.
+five episodes per lineage, and select exactly one joint-silence checkpoint per
+pilot episode. Three annotators label each selected checkpoint. Untouched test
+and challenge items are excluded. This balances the checkpoint's causal
+`elapsed_s` directly; it never buckets an episode by how long the silence later
+lasted.
 
 Before adjudication, report the locked analyses:
 
@@ -369,8 +377,9 @@ natural prevalence and any sampling weights.
 ```text
 semantic-silence-data/
   manifest.jsonl
+  manifest.pilot.jsonl
+  manifest.splits.json
   manifest.jsonl.lock.json
-  splits.json
   clips/
     prefix/
     reveal_user/
