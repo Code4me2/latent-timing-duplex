@@ -10,6 +10,12 @@ from experiments.silence_graft.train_competing_risk_probe import (
     _person_periods,
     run_screen,
 )
+from latent_timing_duplex.silence.outcomes import first_observed_event
+
+
+def test_first_event_uses_nearest_sample_and_user_wins_only_frame_ties() -> None:
+    assert first_observed_event(1.0, 0.99, 4) == ("user_resume", 1.0)
+    assert first_observed_event(1.26, 0.99, 4) == ("recorded_partner_entry", 0.99)
 
 
 def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -> None:
@@ -67,6 +73,9 @@ def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -
         "observed_duration_s": 0.5,
         "administrative_censor_s": 9.0,
         "model_cutoff_s": 1.0,
+        "sample_rate": 100,
+        "user_resume_s": 1.5,
+        "recorded_partner_entry_s": 1.5,
         "user_resume_delay_s": 0.5,
         "recorded_partner_entry_delay_s": 0.5,
         "first_event": "user_resume",
@@ -93,6 +102,9 @@ def test_competing_risk_signal_beats_baseline_and_handles_censoring_and_ties() -
         "observed_duration_s": 0.5,
         "administrative_censor_s": 9.0,
         "model_cutoff_s": 1.0,
+        "sample_rate": 100,
+        "user_resume_s": 1.5,
+        "recorded_partner_entry_s": 1.5,
         "user_resume_delay_s": 0.5,
         "recorded_partner_entry_delay_s": 0.5,
         "user_resume_event": False,

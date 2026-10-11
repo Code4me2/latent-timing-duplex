@@ -22,6 +22,7 @@ try:
         read_hmac_key,
         receipt_bytes,
         require_digest,
+        require_disjoint_output,
         sha256_file,
         sign_receipt,
         verify_receipt,
@@ -32,7 +33,7 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
     from compile_annotations import _exact_assignment_packages, _load_assignment_map
     from compile_r2_dataset import _exact_authenticated_package
     from protocol_v1 import load_protocol_v1
-    from receipts import read_hmac_key, receipt_bytes, require_digest, sha256_file, sign_receipt, verify_receipt
+    from receipts import read_hmac_key, receipt_bytes, require_digest, require_disjoint_output, sha256_file, sign_receipt, verify_receipt
     from render_clips import _json, _jsonl, _nearest_frame, _require_ready, _wav_info
 
 _WINDOWS_MS = (80, 240, 960)
@@ -240,6 +241,10 @@ def build_features(
     config: str | Path = "silence.yaml",
 ) -> Path:
     """Publish one deterministic, authenticated train/development probe archive."""
+    require_disjoint_output(
+        output_dir,
+        [dataset_root, adjudication_root, prefix_root, renderer_root, annotator_root, assignment_root],
+    )
     key = read_hmac_key(hmac_key)
     frozen_features, frozen_receipt = Path(frozen_features), Path(frozen_receipt)
     if any(path.is_symlink() or not path.is_file() for path in (frozen_features, frozen_receipt)):

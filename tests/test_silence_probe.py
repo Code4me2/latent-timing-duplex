@@ -316,6 +316,15 @@ def test_analysis_lock_fails_before_test_open_and_permits_committed_archive(
             "premature_interruption_degradation_max": 0.02,
         },
     }), encoding="utf-8")
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        create_analysis_lock(
+            features, feature_receipt, hashlib.sha256(test_features.read_bytes()).hexdigest(),
+            hashlib.sha256(original_test_receipt).hexdigest(), test_dataset_receipt_hash,
+            analysis_config, key, package / "nested-analysis-lock.json",
+            width=8, steps=20, n_boot=5,
+        )
+    assert not (package / "nested-analysis-lock.json").exists()
+
     lock_path = tmp_path / "analysis-lock.json"
     create_analysis_lock(
         features, feature_receipt, hashlib.sha256(test_features.read_bytes()).hexdigest(),

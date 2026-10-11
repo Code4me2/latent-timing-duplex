@@ -12,15 +12,16 @@ from typing import Any
 import numpy as np
 
 from latent_timing_duplex.silence import fit_softmax_probe, fixed_width_projection
+from latent_timing_duplex.silence.outcomes import first_observed_event
 
 try:
     from experiments.silence_graft.compile_r2_dataset import _exact_authenticated_package
-    from experiments.silence_graft.receipts import read_hmac_key
+    from experiments.silence_graft.receipts import read_hmac_key, require_disjoint_output
     from experiments.silence_graft.render_clips import _jsonl
     from experiments.silence_graft.train_probe import _feature_sets, _load, _stable_seed
 except ModuleNotFoundError:  # Direct script execution from the repository root.
     from compile_r2_dataset import _exact_authenticated_package
-    from receipts import read_hmac_key
+    from receipts import read_hmac_key, require_disjoint_output
     from render_clips import _jsonl
     from train_probe import _feature_sets, _load, _stable_seed
 
@@ -57,12 +58,8 @@ def _normalize_outcome(row: dict[str, Any]) -> dict[str, Any]:
         if delays[cause] is not None and not 0.0 < delays[cause] <= 8.0:
             raise ValueError("observed event delay must be in (0, 8]")
     user, partner = delays["user_resume"], delays["recorded_partner_entry"]
-    event = (
-        "user_resume"
-        if user is not None and (partner is None or user <= partner)
-        else "recorded_partner_entry"
-        if partner is not None
-        else None
+    event, _ = first_observed_event(
+        row.get("user_resume_s"), row.get("recorded_partner_entry_s"), row.get("sample_rate")
     )
     if row.get("first_event") != event:
         raise ValueError("outcome violates the user-resumption tie rule")
@@ -107,7 +104,7 @@ def _load_features(feature_root: Path, hmac_key: Path) -> tuple[dict[str, np.nda
     return _load(path), hashlib.sha256(path.read_bytes()).hexdigest(), hashes["dataset_receipt"]
 
 
-def _load_outcomes(dataset_root: Path, hmac_key: Path) -> tuple[list[dict[str, Any]], str]:
+def _load_outcomes(dataset_root: Path, hmac_key: Path) -> tuple[list[dict[str, Any]], str, int]:
     receipt_payload, receipt, outputs = _exact_authenticated_package(
         Path(dataset_root),
         receipt_name="dataset_receipt.json",
@@ -133,10 +130,16 @@ def _load_outcomes(dataset_root: Path, hmac_key: Path) -> tuple[list[dict[str, A
             if normalized["split"] != split:
                 raise ValueError("outcome is stored under the wrong protected split")
             rows.append(normalized)
-    return rows, hashlib.sha256(receipt_payload).hexdigest()
+    counts = receipt.get("counts")
+    excluded = counts.get("excluded_majority_unratable") if isinstance(counts, dict) else None
+    if isinstance(excluded, bool) or not isinstance(excluded, int) or excluded < 0:
+        raise ValueError("R2 dataset receipt requires an exclusion count")
+    return rows, hashlib.sha256(receipt_payload).hexdigest(), excluded
 
 
-def _align_outcomes(data: dict[str, np.ndarray], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _align_outcomes(
+    data: dict[str, np.ndarray], rows: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], set[str]]:
     by_item: dict[str, dict[str, Any]] = {}
     for row in rows:
         item = row["item_id"]
@@ -158,7 +161,7 @@ def _align_outcomes(data: dict[str, np.ndarray], rows: list[dict[str, Any]]) -> 
     lineage = data["lineage_id"].astype(str)
     if set(lineage[split == "train"]) & set(lineage[split == "development"]):
         raise ValueError("train/development lineages overlap")
-    return aligned
+    return aligned, set(by_item) - set(data["item_id"].astype(str))
 
 
 def _person_periods(
@@ -250,8 +253,11 @@ def run_screen(
     learning_rate: float = 0.1,
     n_boot: int = 10000,
     seed: int = 20261009,
+    expected_omitted_outcomes: int = 0,
 ) -> dict[str, Any]:
-    outcomes = _align_outcomes(data, outcomes)
+    outcomes, omitted_outcomes = _align_outcomes(data, outcomes)
+    if len(omitted_outcomes) != expected_omitted_outcomes:
+        raise ValueError("outcomes without feature rows do not match authenticated exclusions")
     feature_sets, _ = _feature_sets(data, seed)
     split = data["split"].astype(str)
     train, development = split == "train", split == "development"
@@ -393,6 +399,10 @@ def run_screen(
         "censoring": "partial terminal censor intervals omitted; completed no-event intervals retained",
         "tie_rule": "user resumption wins an equal-time recorded-partner-entry tie",
         "seed": seed,
+        "outcomes_without_features": {
+            "count": len(omitted_outcomes),
+            "reason": "majority-unratable items are excluded from causal labels and features",
+        },
         "n_train": int(train.sum()),
         "n_train_informative": n_train_informative,
         "n_train_risk_intervals": n_train_risk_intervals,
@@ -425,17 +435,21 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--n-boot", type=int, default=10000)
     args = parser.parse_args()
+    require_disjoint_output(args.output, [args.feature_root, args.dataset_root])
     if args.output.exists():
         raise FileExistsError(f"refusing to overwrite existing report: {args.output}")
     data, feature_sha256, bound_dataset_sha256 = _load_features(
         args.feature_root, args.hmac_key
     )
-    outcomes, dataset_receipt_sha256 = _load_outcomes(args.dataset_root, args.hmac_key)
+    outcomes, dataset_receipt_sha256, excluded_outcomes = _load_outcomes(
+        args.dataset_root, args.hmac_key
+    )
     if bound_dataset_sha256 != dataset_receipt_sha256:
         raise ValueError("feature and outcome packages bind different R2 datasets")
     report = run_screen(
         data, outcomes, width=args.width, steps=args.steps,
         learning_rate=args.learning_rate, n_boot=args.n_boot, seed=args.seed,
+        expected_omitted_outcomes=excluded_outcomes,
     )
     report["feature_sha256"] = feature_sha256
     report["dataset_receipt_sha256"] = dataset_receipt_sha256

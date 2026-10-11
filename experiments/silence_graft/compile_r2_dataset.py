@@ -10,6 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from latent_timing_duplex.silence.outcomes import first_observed_event
+
 try:
     from experiments.silence_graft.build_assignments import (
         _publish_packages,
@@ -24,6 +26,7 @@ try:
         read_hmac_key,
         receipt_bytes,
         require_digest,
+        require_disjoint_output,
         sign_receipt,
         verify_receipt,
     )
@@ -31,7 +34,7 @@ try:
 except ModuleNotFoundError:  # Direct script execution from the repository root.
     from build_assignments import _publish_packages, _sha256, _verify_output_map
     from compile_annotations import _exact_assignment_packages, _load_assignment_map
-    from receipts import read_hmac_key, receipt_bytes, require_digest, sign_receipt, verify_receipt
+    from receipts import read_hmac_key, receipt_bytes, require_digest, require_disjoint_output, sign_receipt, verify_receipt
     from render_clips import _json, _jsonl, _lines, _require_ready
 
 _ADJUDICATION_SCHEMA = "semantic-silence-adjudication-receipt/v1"
@@ -51,7 +54,7 @@ _LABEL_FIELDS = {
 }
 _OUTCOME_FIELDS = {
     "schema", "protocol_version", "item_id", "session_id", "episode_id", "source",
-    "lineage_id", "split", "onset_s", "model_cutoff_s", "checkpoint_elapsed_s",
+    "lineage_id", "split", "sample_rate", "onset_s", "model_cutoff_s", "checkpoint_elapsed_s",
     "observation_horizon_s", "observed_duration_s", "administrative_censor_s",
     "user_resume_s", "user_resume_delay_s", "user_resume_observed",
     "recorded_partner_entry_s", "recorded_partner_entry_delay_s",
@@ -138,6 +141,9 @@ def compile_r2_dataset(
         Path, (adjudication_root, outcomes_root, annotator_root, coordinator_root)
     )
     manifest_splits, manifest_lock, output_dir = map(Path, (manifest_splits, manifest_lock, output_dir))
+    require_disjoint_output(
+        output_dir, [adjudication_root, outcomes_root, annotator_root, coordinator_root]
+    )
     key = read_hmac_key(hmac_key)
 
     assignment_payload, _, coordinator_outputs = _exact_assignment_packages(
@@ -335,11 +341,9 @@ def compile_r2_dataset(
             ):
                 raise ValueError(f"{where} has a future event outside the observed boundary")
         user_time, partner_time = row["user_resume_s"], row["recorded_partner_entry_s"]
-        expected_event = (
-            "user_resume" if user_time is not None and (partner_time is None or user_time <= partner_time)
-            else "recorded_partner_entry" if partner_time is not None else None
+        expected_event, expected_time = first_observed_event(
+            user_time, partner_time, row["sample_rate"]
         )
-        expected_time = user_time if expected_event == "user_resume" else partner_time if expected_event else None
         if row.get("first_event") != expected_event or row.get("first_event_s") != expected_time:
             raise ValueError(f"{where} violates the locked first-event or tie rule")
         expected_duration = (expected_time if expected_time is not None else censor) - cutoff

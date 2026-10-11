@@ -24,13 +24,14 @@ try:
         canonical_json,
         read_hmac_key,
         require_digest,
+        require_disjoint_output,
         sha256_bytes,
         sha256_file,
         verify_receipt,
     )
     from experiments.silence_graft.render_clips import _json
 except ModuleNotFoundError:  # Direct script execution from the repository root.
-    from receipts import canonical_json, read_hmac_key, require_digest, sha256_bytes, sha256_file, verify_receipt
+    from receipts import canonical_json, read_hmac_key, require_digest, require_disjoint_output, sha256_bytes, sha256_file, verify_receipt
     from render_clips import _json
 
 REQUIRED = {
@@ -487,6 +488,11 @@ def main() -> None:
     parser.add_argument("--analysis-lock", type=Path)
     parser.add_argument("--hmac-key", type=Path)
     args = parser.parse_args()
+    protected = [
+        path.parent for path in (args.features, args.test_features)
+        if path is not None and (path.parent / "READY").is_file()
+    ]
+    require_disjoint_output(args.output, protected)
     if args.output.exists():
         raise FileExistsError(f"refusing to overwrite existing report: {args.output}")
     report = _run(args)

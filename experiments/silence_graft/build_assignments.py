@@ -347,14 +347,18 @@ def build_assignments(
         cutoff = row.get("model_cutoff_s")
         if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)):
             raise ValueError(f"private source mapping row {number} requires model_cutoff_s")
-        for field in ("user_channel", "assistant_channel"):
-            if isinstance(row.get(field), bool) or not isinstance(row.get(field), int):
-                raise ValueError(f"private source mapping row {number} requires integer {field}")
+        for field in ("user_channel", "assistant_channel", "sample_rate"):
+            if (
+                isinstance(row.get(field), bool) or not isinstance(row.get(field), int)
+                or (field == "sample_rate" and row[field] <= 0)
+            ):
+                raise ValueError(f"private source mapping row {number} requires valid integer {field}")
         if not hmac.compare_digest(item, _item_id(key, row["episode_id"], float(cutoff))):
             raise ValueError("item ID does not match private HMAC key and source mapping")
         binding = {
-            "assistant_channel": row["assistant_channel"], "session_id": row["session_id"],
-            "user_channel": row["user_channel"], "wav_sha256": row["wav_sha256"],
+            "assistant_channel": row["assistant_channel"], "sample_rate": row["sample_rate"],
+            "session_id": row["session_id"], "user_channel": row["user_channel"],
+            "wav_sha256": row["wav_sha256"],
         }
         previous = session_bindings.setdefault(row["session_id"], binding)
         if previous != binding:

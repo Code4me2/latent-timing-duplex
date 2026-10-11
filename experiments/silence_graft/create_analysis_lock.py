@@ -14,6 +14,7 @@ try:
         read_hmac_key,
         receipt_bytes,
         require_digest,
+        require_disjoint_output,
         sha256_bytes,
         sha256_file,
         sign_receipt,
@@ -27,6 +28,7 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
         read_hmac_key,
         receipt_bytes,
         require_digest,
+        require_disjoint_output,
         sha256_bytes,
         sha256_file,
         sign_receipt,
@@ -96,6 +98,7 @@ def create_analysis_lock(
     features, feature_receipt, analysis_config, output = map(
         Path, (features, feature_receipt, analysis_config, output)
     )
+    require_disjoint_output(output, [features.parent])
     if output.exists():
         raise FileExistsError(f"refusing to overwrite existing analysis lock: {output}")
     if features.name != "features.npz" or feature_receipt.name != "feature_receipt.json":

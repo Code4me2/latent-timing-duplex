@@ -102,7 +102,7 @@ def _inputs(tmp_path: Path, *, media_updates=None, manifest_updates=None, key_by
         case = index % 4
         resume = None if case == 3 else 1.0 if case == 2 else 1.5
         user = [[0.0, 0.145], *([] if resume is None else [[resume, 2.0]])]
-        assistant = [[1.0, 1.1]] if case in {1, 2} else []
+        assistant = [[0.99 if case == 2 else 1.0, 1.1]] if case in {1, 2} else []
         vad_rows.append({
             "session_id": session, "lineage_id": lineage,
             "source": "test-corpus", "duration_s": 2.0,
@@ -270,8 +270,8 @@ def test_renders_separate_frame_exact_signed_packages(tmp_path: Path) -> None:
     assert receipt["key_fingerprint"] == hashlib.sha256(key.read_bytes()).hexdigest()
     assert len(receipt["sources"]) == 75
     assert receipt["sources"][0] == {
-        "assistant_channel": 0, "session_id": "source-session-000", "user_channel": 1,
-        "wav_sha256": mapping[0]["wav_sha256"],
+        "assistant_channel": 0, "sample_rate": 4, "session_id": "source-session-000",
+        "user_channel": 1, "wav_sha256": mapping[0]["wav_sha256"],
     }
     assert mapping[0]["lineage_id"].startswith("lineage-")
 
@@ -620,6 +620,14 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
         (coordinator_root / "assignment_receipt.json").read_bytes()
     ).hexdigest()
 
+    nested_outcomes = coordinator_root / "nested-outcomes"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        extract_outcomes(
+            tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
+            annotator_root, coordinator_root, key, nested_outcomes, CONFIG,
+        )
+    assert not nested_outcomes.exists()
+
     outcomes_root = extract_outcomes(
         tmp_path / "vad.jsonl", tmp_path / "manifest.jsonl.lock.json",
         annotator_root, coordinator_root, key, tmp_path / "outcomes", CONFIG,
@@ -630,7 +638,8 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
         None, "user_resume", "recorded_partner_entry"
     }
     tie = next(row for row in outcomes if row["session_id"] == "source-session-002")
-    assert tie["first_event"] == "user_resume"
+    assert tie["recorded_partner_entry_s"] < tie["user_resume_s"]
+    assert tie["sample_rate"] == 4 and tie["first_event"] == "user_resume"
     assert tie["recorded_overlap_at_user_resume"] is True
     assert tie["overlap_duration_s"] == pytest.approx(0.1)
 
@@ -645,6 +654,15 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
             tmp_path / "vad.jsonl", different_lock_path, annotator_root, coordinator_root,
             key, tmp_path / "rejected-different-lock", CONFIG,
         )
+
+    nested_dataset = outcomes_root / "nested-dataset"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        compile_r2_dataset(
+            labels_root, outcomes_root, annotator_root, coordinator_root,
+            tmp_path / "manifest.splits.json", tmp_path / "manifest.jsonl.lock.json",
+            key, nested_dataset,
+        )
+    assert not nested_dataset.exists()
 
     dataset = compile_r2_dataset(
         labels_root, outcomes_root, annotator_root, coordinator_root,
@@ -712,6 +730,14 @@ def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -
         "state_reset": "per_prefix_clip",
         "history_truncation": "renderer_prefix_or_session_start",
     }, key.read_bytes())))
+    nested_features = prefix_root / "nested-features"
+    with pytest.raises(ValueError, match="separate from authenticated input packages"):
+        build_features(
+            dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
+            frozen_path, frozen_receipt, key, nested_features, CONFIG,
+        )
+    assert not nested_features.exists()
+
     feature_package = build_features(
         dataset, labels_root, prefix_root, renderer_root, annotator_root, coordinator_root,
         frozen_path, frozen_receipt, key, tmp_path / "r2-features", CONFIG,

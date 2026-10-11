@@ -11,6 +11,7 @@ from typing import Any
 
 from latent_timing_duplex.config import repo_root
 from latent_timing_duplex.silence import SilenceContext, extract_silence_checkpoints
+from latent_timing_duplex.silence.outcomes import first_observed_event
 
 try:
     from experiments.silence_graft.build_assignments import _publish_packages, _sha256
@@ -23,6 +24,7 @@ try:
     from experiments.silence_graft.receipts import (
         read_hmac_key,
         receipt_bytes,
+        require_disjoint_output,
         require_digest,
         sign_receipt,
         verify_receipt,
@@ -33,7 +35,7 @@ except ModuleNotFoundError:  # Direct script execution from the repository root.
     from build_manifest import _sessions, assign_lineage_splits, elapsed_stratum
     from compile_annotations import _exact_assignment_packages, _load_assignment_map
     from protocol_v1 import load_protocol_v1
-    from receipts import read_hmac_key, receipt_bytes, require_digest, sign_receipt, verify_receipt
+    from receipts import read_hmac_key, receipt_bytes, require_digest, require_disjoint_output, sign_receipt, verify_receipt
     from render_clips import _json, _lines
 
 _OUTCOME_SCHEMA = "semantic-silence-observed-outcome/v1"
@@ -106,6 +108,7 @@ def extract_outcomes(
     vad, manifest_lock, annotator_root, coordinator_root, output_dir = map(
         Path, (vad, manifest_lock, annotator_root, coordinator_root, output_dir)
     )
+    require_disjoint_output(output_dir, [annotator_root, coordinator_root])
     key = read_hmac_key(hmac_key)
     _, config_payload, cfg = load_protocol_v1(config)
     protocol_payload = (repo_root() / "docs" / _PROTOCOL_DOC).read_bytes()
@@ -186,7 +189,7 @@ def extract_outcomes(
             field: row[field]
             for field in (
                 "item_id", "session_id", "episode_id", "source", "lineage_id", "split",
-                "onset_s", "model_cutoff_s", "checkpoint_elapsed_s",
+                "onset_s", "model_cutoff_s", "checkpoint_elapsed_s", "sample_rate",
             )
         }
         if item in originals and originals[item] != identity:
@@ -259,12 +262,9 @@ def extract_outcomes(
         if partner_entry is not None and partner_entry <= cutoff + _EPSILON:
             raise ValueError("recorded-partner outcome must be strictly after cutoff")
 
-        if user_resume is not None and (partner_entry is None or user_resume <= partner_entry):
-            first_event, first_event_s = "user_resume", user_resume
-        elif partner_entry is not None:
-            first_event, first_event_s = "recorded_partner_entry", partner_entry
-        else:
-            first_event = first_event_s = None
+        first_event, first_event_s = first_observed_event(
+            user_resume, partner_entry, identity["sample_rate"]
+        )
         right_censored = first_event is None
         rows.append({
             "schema": _OUTCOME_SCHEMA,
@@ -275,6 +275,7 @@ def extract_outcomes(
             "source": identity["source"],
             "lineage_id": identity["lineage_id"],
             "split": identity["split"],
+            "sample_rate": identity["sample_rate"],
             "onset_s": checkpoint.onset_s,
             "model_cutoff_s": cutoff,
             "checkpoint_elapsed_s": checkpoint.elapsed_s,
