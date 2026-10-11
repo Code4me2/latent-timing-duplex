@@ -82,10 +82,19 @@ challenge sets are excluded. Three annotators label every item. Lock partitions 
 conversation or podcast episode may appear in only one partition.
 
 The pilot is audio-only: fixed 20-second prefix, fixed 8-second user-only reveal
-clipped at session end, no transcript, nearest-sample boundary rounding, and no
-gain change (`gain_db: 0.0` at conversation/session scope). Repeat 5% of
-assignments. Add no automatic sentinels unless the coordinator supplies a
-locked sentinel list.
+clipped at session end, no transcript, a rounded cutoff plus exact rounded
+duration frame counts, and no gain change (`gain_db: 0.0` at
+conversation/session scope). Prefixes and coordinator-only reveals are rendered
+to separate new-only, `READY`-marked roots from source-WAV hashes. Repeat 5%
+of assignments (exactly 0.05 in v1). A null sentinel lock forbids a list; otherwise its
+exact SHA-256 is required in config and the authenticated channel-audition
+receipt.
+
+Renderer, channel-audition, assignment, completion, and release records use a
+private HMAC key of at least 32 bytes and publish its nonsecret SHA-256
+fingerprint. Public queues use a distinct copied media alias per presentation
+and expose no item, repeat, sentinel, source, episode, or raw-annotator linkage.
+Release requires authenticated completion rows with locked annotation hashes.
 
 Use nominal Krippendorff α for primary action with `UNRATABLE` missing, plus
 per-class positive agreement, onset endpoint disagreement, repeat consistency,
