@@ -31,14 +31,18 @@ from joint-silence semantic metrics.
 
 ## Annotation record
 
-One JSON object per annotator and checkpoint:
+One strict assigned-prefix JSON object per annotator and checkpoint:
 
 ```json
 {
-  "episode_id": "conversation:00012",
-  "checkpoint_elapsed_s": 0.96,
-  "annotator": "a1",
+  "schema": "semantic-silence-prefix-response/v1",
+  "protocol_version": "semantic-silence-pilot/v1",
+  "assignment_id": "opaque-assignment",
+  "presentation_id": "opaque-presentation",
+  "annotator_id": "private-annotator-id",
   "action": "wait",
+  "confidence": 4,
+  "also_acceptable": [],
   "tags": ["floor_holding", "hesitation"],
   "acceptable_onset": {
     "earliest_elapsed_s": null,
@@ -49,6 +53,10 @@ One JSON object per annotator and checkpoint:
   "ratable": true
 }
 ```
+
+Source, item, episode, repeat, lineage, corpus, and checkpoint elapsed time are
+joined only through the coordinator-private assignment map. The canonical
+sorted compact response object is SHA-256 locked before reveal.
 
 Primary actions:
 
@@ -98,8 +106,10 @@ Release requires authenticated completion rows with locked annotation hashes.
 
 Use nominal Krippendorff α for primary action with `UNRATABLE` missing, plus
 per-class positive agreement, onset endpoint disagreement, repeat consistency,
-and lineage-bootstrap intervals (seed `20261009`, 10,000 replicates). Continue
-with the original taxonomy only if α is at least 0.80. Otherwise collapse
+and lineage-bootstrap intervals (seed `20261009`, 10,000 requested replicates,
+with valid counts reported separately). Continue with the original taxonomy
+only if α is at least 0.80, at least 80% of items are pairable across at least
+30 lineages, and at least 90% of alpha bootstrap replicates are valid. Otherwise collapse
 exactly as `ACK→RESPOND`, `WAIT→WAIT`, `RESPOND→RESPOND`, and `REPAIR→REPAIR`.
 A failed five-class pilot cannot be reused for collapsed reliability; run a new
 pilot. Do not respond to persistent disagreement by scaling the model.
@@ -117,11 +127,10 @@ component, not a learned controller and not yet a Moshi actuator.
 hidden state, hidden velocity, predicted latent, and available negative-control
 features using a fixed-width linear probe. It trains on `train`, evaluates
 `development` by default, and bootstraps paired differences by lineage. Input
-archives with `available_at_s > model_cutoff_s` are rejected.
+archives with nonfinite timing, `available_at_s > model_cutoff_s`, lineage split leakage, or inconsistent session lineage/split bindings are rejected.
 
 The probe report cannot by itself pass the R2 efficacy gate: acceptable-onset
-and interruption outcomes still require replay. Opening the untouched test
-split requires both an analysis-lock receipt and the explicit test flag.
+and interruption outcomes still require replay. Test evaluation currently fails closed until authenticated analysis-lock receipt verification is implemented.
 
 ## Explicit exclusions
 

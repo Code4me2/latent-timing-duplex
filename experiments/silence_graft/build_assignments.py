@@ -7,14 +7,14 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import random
 import shutil
+from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from latent_timing_duplex.config import repo_root
 
@@ -28,24 +28,25 @@ try:
         sign_receipt,
         verify_receipt,
     )
+    from experiments.silence_graft.protocol_v1 import load_protocol_v1
     from experiments.silence_graft.render_clips import (
-        _config_path,
         _item_id,
         _json,
         _jsonl,
         _lines,
-        _directory_identity,
         _publish_staging,
         _remove_owned_directory,
+        _remove_ready,
         _require_ready,
         _reserve,
         _write,
     )
 except ModuleNotFoundError:  # Direct script execution from the repository root.
+    from protocol_v1 import load_protocol_v1
     from receipts import read_hmac_key, receipt_bytes, require_digest, sha256_bytes, sha256_file, sign_receipt, verify_receipt
     from render_clips import (
-        _config_path, _directory_identity, _item_id, _json, _jsonl, _lines,
-        _publish_staging, _remove_owned_directory, _require_ready, _reserve, _write,
+        _item_id, _json, _jsonl, _lines,
+        _publish_staging, _remove_owned_directory, _remove_ready, _require_ready, _reserve, _write,
     )
 
 _QUEUE_SCHEMA = "semantic-silence-prefix-assignment/v1"
@@ -139,21 +140,29 @@ def _roots_overlap(*roots: Path) -> bool:
 def _publish_packages(packages: Mapping[Path, Mapping[str, bytes]]) -> tuple[Path, ...]:
     targets = list(packages)
     staging: dict[Path, Path] = {}
-    reserved: dict[Path, tuple[int, int]] = {}
+    reserved: dict[Path, tuple[int, tuple[int, int]]] = {}
     try:
         for target, files in packages.items():
-            staging[target] = _reserve(target)
-            reserved[target] = _directory_identity(target)
+            stage, descriptor, identity = _reserve(target)
+            staging[target], reserved[target] = stage, (descriptor, identity)
             for relative, payload in files.items():
-                path = staging[target] / relative
+                path = stage / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 _write(path, payload)
         for target in targets:
-            _publish_staging(staging.pop(target), target)
+            stage = staging[target]
+            descriptor, identity = reserved[target]
+            _publish_staging(stage, target, descriptor, identity)
+            staging.pop(target)  # Keep cleanup ownership until publication succeeds.
+        for descriptor, _ in reserved.values():
+            os.close(descriptor)
+        reserved.clear()
     except Exception:
         for path in staging.values():
             shutil.rmtree(path, ignore_errors=True)
-        for path, identity in reserved.items():
+        for path, (descriptor, identity) in reserved.items():
+            _remove_ready(descriptor)
+            os.close(descriptor)
             _remove_owned_directory(path, identity)
         raise
     return tuple(targets)
@@ -245,8 +254,7 @@ def build_assignments(
     _require_ready(prefix_root, "prefix package")
     _require_ready(coordinator_root, "coordinator package")
     key = read_hmac_key(hmac_key)
-    config_path = _config_path(config)
-    config_payload = config_path.read_bytes()
+    config_path, config_payload, cfg = load_protocol_v1(config)
     protocol_payload = (repo_root() / "docs" / "DATA_LABELING_PROTOCOL.md").read_bytes()
     annotator_payload = annotator_ids.read_bytes()
     renderer_path = coordinator_root / "renderer_receipt.json"
@@ -256,26 +264,11 @@ def build_assignments(
     if renderer.get("schema") != _RENDERER_SCHEMA:
         raise ValueError("invalid renderer receipt schema")
 
-    cfg = yaml.safe_load(config_payload)
-    annotation = cfg.get("annotation") if isinstance(cfg, dict) else None
-    silence = cfg.get("silence") if isinstance(cfg, dict) else None
-    if not isinstance(annotation, dict) or not isinstance(silence, dict):
-        raise ValueError("config requires annotation and silence mappings")
-    if annotation.get("annotators_per_item") != 3:
-        raise ValueError("config must require exactly 3 annotators per item")
-    if annotation.get("repeat_fraction") != 0.05 or isinstance(annotation.get("repeat_fraction"), bool):
-        raise ValueError("protocol v1 requires repeat_fraction exactly 0.05")
-    if annotation.get("automatic_sentinels") is not False:
-        raise ValueError("automatic sentinels must be disabled")
-    sentinel_config = annotation.get("coordinator_locked_sentinel_list")
-    if sentinel_config is not None:
-        require_digest(sentinel_config, "config coordinator_locked_sentinel_list")
-    seed = silence.get("split_seed")
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        raise ValueError("config silence.split_seed must be an integer")
-    protocol = cfg.get("protocol_version")
-    if not isinstance(protocol, str) or not protocol:
-        raise ValueError("config requires protocol_version")
+    annotation = cfg["annotation"]
+    silence = cfg["silence"]
+    sentinel_config = annotation["coordinator_locked_sentinel_list"]
+    seed = silence["split_seed"]
+    protocol = cfg["protocol_version"]
     if renderer.get("protocol_version") != protocol:
         raise ValueError("renderer protocol version does not match config")
     hashes = renderer.get("sha256")
@@ -334,13 +327,18 @@ def build_assignments(
         by_item[item] = {**row, "prefix_path": prefix_path, "reveal_path": reveal_path}
 
     session_bindings: dict[str, dict[str, Any]] = {}
+    session_scope: dict[str, tuple[str, str, str]] = {}
+    lineage_bindings: dict[str, tuple[str, str]] = {}
+    lineage_counts: Counter[str] = Counter()
     for number, row in enumerate(source_rows, 1):
         item = row.get("item_id")
-        required_strings = ("episode_id", "source", "lineage_id", "session_id")
+        required_strings = ("episode_id", "source", "lineage_id", "session_id", "split")
         if item not in by_item or item in sources:
             raise ValueError(f"private source mapping row {number} has unknown or duplicate item_id")
         if any(not isinstance(row.get(field), str) or not row[field] for field in required_strings):
             raise ValueError(f"private source mapping row {number} requires source and lineage identity")
+        if row.get("split") not in annotation["pilot_splits"]:
+            raise ValueError(f"private source mapping row {number} uses an excluded split")
         require_digest(row.get("wav_sha256"), f"private source mapping row {number} wav_sha256")
         cutoff = row.get("model_cutoff_s")
         if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)):
@@ -356,10 +354,29 @@ def build_assignments(
         }
         previous = session_bindings.setdefault(row["session_id"], binding)
         if previous != binding:
-            raise ValueError("private source mapping has inconsistent session bindings")
+            raise ValueError("private source mapping has inconsistent session channel bindings")
+        scope = (row["source"], row["lineage_id"], row["split"])
+        if session_scope.setdefault(row["session_id"], scope) != scope:
+            raise ValueError("private source mapping has inconsistent session source/lineage/split binding")
+        lineage_scope = (row["source"], row["split"])
+        if lineage_bindings.setdefault(row["lineage_id"], lineage_scope) != lineage_scope:
+            raise ValueError("private source mapping has inconsistent lineage source/split binding")
+        lineage_counts[row["lineage_id"]] += 1
         sources[item], episodes[item] = row, row["episode_id"]
     if set(sources) != set(by_item):
         raise ValueError("coordinator media index and private source mapping items differ")
+    minimum_items, maximum_items = annotation["pilot_review_range_episodes"]
+    if not minimum_items <= len(sources) <= maximum_items:
+        raise ValueError(
+            f"production pilot requires {minimum_items}–{maximum_items} items; found {len(sources)}"
+        )
+    if len(lineage_counts) < annotation["pilot_min_lineages"]:
+        raise ValueError("production pilot does not meet the lineage minimum")
+    if any(count > silence["max_episodes_per_lineage"] for count in lineage_counts.values()):
+        raise ValueError("production pilot exceeds the per-lineage item cap")
+    renderer_counts = renderer.get("counts")
+    if renderer_counts != {"clips": 2 * len(by_item), "items": len(by_item), "sessions": len(session_bindings)}:
+        raise ValueError("renderer receipt counts do not match authenticated media maps")
     receipt_sources = renderer.get("sources")
     if (
         not isinstance(receipt_sources, list)
@@ -416,18 +433,32 @@ def build_assignments(
     shuffled_items, shuffled_annotators = sorted(by_item), annotators.copy()
     _rng(seed, "item-balance").shuffle(shuffled_items)
     _rng(seed, "annotator-balance").shuffle(shuffled_annotators)
+    annotator_rank = {annotator: index for index, annotator in enumerate(shuffled_annotators)}
     queues: dict[str, list[dict[str, Any]]] = {annotator: [] for annotator in annotators}
-    for index, item in enumerate(shuffled_items):
-        for slot in range(3):
-            annotator = shuffled_annotators[(index * 3 + slot) % len(annotators)]
-            queues[annotator].append({
-                "annotator_id": annotator,
-                "assignment_id": _opaque(key, "assignment", annotator, item, "original"),
-                "item_id": item,
-                "presentation_id": _opaque(key, "presentation", annotator, item, "original"),
-                "repeat": False,
-                "sentinel": item in sentinel_ids,
-            })
+    lineage_items: dict[str, list[str]] = {}
+    for item in shuffled_items:
+        lineage_items.setdefault(sources[item]["lineage_id"], []).append(item)
+    for items in lineage_items.values():
+        used: set[str] = set()
+        for item in items:
+            available = sorted(
+                (annotator for annotator in annotators if annotator not in used),
+                key=lambda annotator: (len(queues[annotator]), annotator_rank[annotator]),
+            )
+            if len(available) < annotation["annotators_per_item"]:
+                raise ValueError(
+                    "annotator pool is too small to keep original items lineage-independent"
+                )
+            for annotator in available[: annotation["annotators_per_item"]]:
+                queues[annotator].append({
+                    "annotator_id": annotator,
+                    "assignment_id": _opaque(key, "assignment", annotator, item, "original"),
+                    "item_id": item,
+                    "presentation_id": _opaque(key, "presentation", annotator, item, "original"),
+                    "repeat": False,
+                    "sentinel": item in sentinel_ids,
+                })
+                used.add(annotator)
 
     private_rows: list[dict[str, Any]] = []
     reveal_rows: list[dict[str, Any]] = []

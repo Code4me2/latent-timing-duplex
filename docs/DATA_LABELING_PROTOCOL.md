@@ -2,7 +2,9 @@
 
 **Status:** R1 scaffold; the construct/data gate remains open until a real
 pilot agreement receipt passes the criteria in §13.
-**Protocol version:** `semantic-silence-labels/v1`  
+**Protocol version:** `semantic-silence-pilot/v1`
+
+**Label schema:** `semantic-silence-labels/v1`
 **Related:** [SILENCE_GRAFT.md](SILENCE_GRAFT.md),
 [RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md)
 
@@ -99,14 +101,17 @@ Build the locked manifest:
 ```bash
 python experiments/silence_graft/build_manifest.py \
   --vad /private/data/vad.jsonl \
-  --output /private/data/silence_manifest.jsonl
+  --output /private/data/silence_manifest.jsonl \
+  --hmac-key /private/keys/pilot-hmac.key
 ```
 
 The builder reads all extraction, split, and pilot settings from
 `configs/silence.yaml` (or `--config PATH_OR_NAME`). It writes the full
 manifest, derived `.pilot.jsonl` and `.splits.json` companions, and one
-`.jsonl.lock.json` receipt hashing the input, config, this protocol, and every
-artifact. The render lock must contain exact schema, protocol, and label-schema
+HMAC-authenticated `.jsonl.lock.json` receipt hashing the input, config, this
+protocol, and every artifact. Building and rendering require the same regular,
+non-symlink, mode-`0600` key. The render lock must contain exact schema,
+protocol, and label-schema
 values plus valid mandatory `pilot_manifest`, `config`, and `protocol_doc`
 SHA-256 digests. Every pilot row requires explicit `source` and `lineage_id`.
 Existing artifacts are never overwritten. Annotate only
@@ -188,17 +193,19 @@ Render to separate `--prefix-output-dir` and `--coordinator-output-dir` roots.
 The prefix root contains only prefix WAVs and `READY`; reveals, source joins,
 render records, and the authenticated renderer receipt remain under the
 coordinator root. The media index must list exactly the pilot sessions and bind
-each source with lowercase `wav_sha256`. The renderer hashes every source before
-rendering and after all reads. Consumers require both `READY` markers.
+each source with lowercase `wav_sha256`. The renderer opens each unique regular
+source without following symlinks, hashes it while making one private mode-0600
+snapshot, and renders only that immutable snapshot. Consumers require both
+`READY` markers.
 
 Build queues with `experiments/silence_graft/build_assignments.py build`, both
 renderer roots, separate `--annotator-output-dir` and
 `--coordinator-output-dir` targets, a cryptographically random per-pilot HMAC
-key of at least 32 bytes, at least three distinct private annotator IDs, and the
+key of at least 32 bytes, enough distinct private annotator IDs to assign three reviewers per item without giving any reviewer two original items from one lineage, and the
 authenticated audition receipt. The key must be a regular, non-symlink file
 with no group/other permissions (for example mode `0600`); rotate it for each
 pilot and never distribute it to annotators. The targets must not be equal or nested. Exactly three distinct
-annotators receive each item. Assignment loads are deterministically balanced,
+annotators receive each item, and each annotator receives at most one original item per lineage so a later prefix cannot reveal an earlier item's continuation. Assignment loads are deterministically balanced,
 then each queue is randomized with the split seed. Protocol v1 requires an
 exact repeat fraction of 0.05. Repeat 5% of each nonempty base queue, rounded to
 nearest with a minimum of one; a repeat has the same item but new assignment and
@@ -215,9 +222,10 @@ repeat/sentinel status, stable source clip paths or hashes, raw annotator
 identity, corpus/source, session, episode, reveal data, model score, outcome,
 or other answers.
 
-The coordinator root contains `private_assignment_source_map.jsonl`,
-`coordinator_reveal_release_map.jsonl`, the authenticated assignment receipt,
-and `READY`, with no copied prefix media. The receipt separately authenticates
+The coordinator root contains `private_assignment_source_map.jsonl` (including
+source, lineage, item, repeat status, and checkpoint elapsed time for grouped
+agreement), `coordinator_reveal_release_map.jsonl`, the authenticated assignment
+receipt, and `READY`, with no copied prefix media. The receipt separately authenticates
 `annotator_outputs` and coordinator `outputs`; consumers require both `READY`
 markers and exact file sets in both roots. Do not generate sentinels. A null
 sentinel config forbids a list. A non-null value must be the exact lowercase
@@ -239,6 +247,25 @@ path, schema, and protocol. Reveal hashes remain private; the authenticated
 release receipt binds all emitted bytes. Renderer, assignment, completion, and
 release receipts use canonical HMAC-SHA-256 and include the nonsecret key
 fingerprint.
+
+Compile raw prefix responses with `compile_annotations.py report`. The command
+requires both exact assignment roots, raw response JSONL, the pilot HMAC key,
+config, and a new output directory. It emits release-compatible completion
+artifacts, validated private annotations, and an authenticated agreement
+report/receipt. The private renderer/assignment mapping carries explicit
+`onset_s`, `elapsed_s`, and `model_cutoff_s`; the compiler checks their causal
+identity and lineage-disjoint splits. Test code may inject a smaller bootstrap count through the Python API, but it
+is marked nonconfirmatory and can never pass the gate or permit adjudication;
+the CLI always uses the configured 10,000. A failed receipt states that a new
+collapsed pilot is required and cannot be adjudicated.
+
+`compile_annotations.py adjudicate` accepts only a passing authenticated
+agreement receipt and its exact validated annotation bytes. No-majority items
+require a separately authenticated expert JSONL containing exactly `item_id`
+and a ratable `action`. Adjudicated model labels preserve original action
+counts and expose only causal split/source/lineage timing and aggregate targets;
+they never expose raw annotator, episode/session, reveal, silence-end, or
+outcome fields.
 
 Package publication reserves each target directory with exclusive mode-`0700`
 `mkdir`, writes files mode `0600`, populates it through staging, writes `READY`
@@ -342,16 +369,18 @@ Also retain detailed flags outside the primary enum when available:
 
 Technical dropout must not automatically become semantic `REPAIR`.
 
-## 11. Raw annotation record
+## 11. Raw assigned-prefix response
 
-One JSON object per annotator and checkpoint:
+One JSON object per blinded assignment uses the strict
+`semantic-silence-prefix-response/v1` schema:
 
 ```json
 {
-  "schema": "semantic-silence-labels/v1",
-  "episode_id": "conversation-001:00012",
-  "checkpoint_elapsed_s": 0.96,
-  "annotator": "a1",
+  "schema": "semantic-silence-prefix-response/v1",
+  "protocol_version": "semantic-silence-pilot/v1",
+  "assignment_id": "opaque-assignment",
+  "presentation_id": "opaque-presentation",
+  "annotator_id": "private-annotator-id",
   "action": "wait",
   "confidence": 4,
   "also_acceptable": ["ack"],
@@ -362,15 +391,20 @@ One JSON object per annotator and checkpoint:
     "wait_for_user_resume": true
   },
   "quality": "clean",
-  "ratable": true,
-  "clip_sha256": "..."
+  "ratable": true
 }
 ```
 
-Store reveal-pass judgments separately or under explicitly named
-`retrospective_*` fields. Store automatically measured user resumption,
-assistant onset, overlap, and censoring in `outcomes.jsonl`, not in the semantic
-annotation record.
+These are the only permitted fields. The collector rejects unknown or duplicate
+JSON keys, non-finite numbers, coercible booleans/numbers, duplicate assignment
+IDs, and inconsistent onset or `UNRATABLE` values. It hashes the sorted compact
+UTF-8 JSON object for the completion record's `annotation_sha256`. The older
+`SilenceAnnotation`/`semantic-silence-labels/v1` representation remains an
+internal compatibility format, not an assigned pilot response.
+
+Store reveal-pass judgments separately. Store automatically measured user
+resumption, assistant onset, overlap, and censoring in `outcomes.jsonl`, not in
+the semantic annotation record.
 
 ## 12. Annotator preparation and quality control
 
@@ -405,10 +439,17 @@ Before adjudication, report the locked analyses:
 - earliest- and latest-onset endpoint disagreement;
 - 5% repeat consistency and unratable rate;
 - agreement by corpus and checkpoint-elapsed-time duration stratum;
-- 95% lineage-bootstrap intervals using seed `20261009` and 10,000 replicates.
+- 95% lineage-bootstrap intervals for the overall, corpus, and elapsed-stratum
+  reports whenever at least two lineages are available, using seed `20261009`
+  and 10,000 replicates (valid replicates are reported separately).
 
-Continue with the original action taxonomy only if nominal primary-action alpha
-is at least 0.80. If it is lower, revise examples and collapse exactly once:
+Sparse stratum intervals are descriptive and are not a gate. Continue with the
+original action taxonomy only if nominal primary-action alpha
+is at least 0.80, at least 80% of items have two ratable judgments across at
+least 30 lineages, and at least 90% of alpha bootstrap replicates are valid.
+The production sample targets 75 items and must remain within the locked 60–90 review range from at least 30
+lineages with at most five per lineage. If any gate condition fails, revise
+examples and collapse exactly once:
 
 ```text
 ACK     -> RESPOND
@@ -425,7 +466,11 @@ with a larger model.
 
 Preserve every raw judgment. Produce adjudicated labels only after raw
 agreement is reported. When all three primary labels differ, require expert
-adjudication; otherwise retain the majority label. Preserve the empirical label
+adjudication; otherwise retain the majority label. Expert actions must have
+been observed among that item's ratable judgments. A majority-`UNRATABLE` item
+is excluded with an authenticated disposition, not forced into a ratable
+label. Independent, role-separated expert signing remains a future operational
+requirement; timestamps are not proof of pre-reveal ordering. Preserve the empirical label
 distribution for later soft-target experiments. The R1 gate closes only when a
 real pilot agreement receipt records the locked sample, raw metrics, bootstrap
 settings, taxonomy decision, and pass result.
@@ -490,7 +535,7 @@ Media, private paths, annotations containing restricted source identifiers, and
 untouched test labels remain outside Git. Render with
 `experiments/silence_graft/render_clips.py` from the locked pilot manifest and
 receipt, an exact-session absolute-path private media index with source hashes,
-and a private HMAC key of at least 32 bytes. The renderer refuses either
+and a regular non-symlink mode-`0600` private HMAC key of at least 32 bytes. The renderer refuses either
 existing output directory, writes opaque clip names, and records source joins
 only in the coordinator-private mapping. Commit only schemas, protocol text,
 aggregate statistics, and cryptographic receipts permitted by source terms.

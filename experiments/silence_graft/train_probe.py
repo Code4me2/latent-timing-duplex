@@ -69,8 +69,25 @@ def _load(path: Path) -> dict[str, np.ndarray]:
     n = len(data["action"])
     if any(len(value) != n for value in data.values()):
         raise ValueError("every feature archive array must share its first dimension")
+    for name in ("available_at_s", "model_cutoff_s", "elapsed_s"):
+        values = np.asarray(data[name], dtype=np.float64)
+        if values.shape != (n,) or not np.all(np.isfinite(values)):
+            raise ValueError(f"feature archive {name} must be a finite row vector")
+    if np.any(data["elapsed_s"] < 0):
+        raise ValueError("feature archive elapsed_s must be non-negative")
     if np.any(data["available_at_s"] > data["model_cutoff_s"] + 1e-9):
         raise ValueError("feature archive contains future-observing rows")
+    session, lineage, split = (
+        data[name].astype(str) for name in ("session_id", "lineage_id", "split")
+    )
+    if any(not value for values in (session, lineage, split) for value in values):
+        raise ValueError("session, lineage, and split identities must be non-empty")
+    for values, groups, where in (
+        (split, lineage, "lineage"),
+        (np.asarray([f"{a}\0{b}" for a, b in zip(lineage, split)]), session, "session"),
+    ):
+        if any(np.unique(values[groups == group]).size != 1 for group in np.unique(groups)):
+            raise ValueError(f"feature archive has inconsistent {where} split bindings")
     return data
 
 
@@ -88,6 +105,10 @@ def main() -> None:
     )
     parser.add_argument("--evaluate-test", action="store_true")
     args = parser.parse_args()
+    if args.evaluate_test:
+        raise ValueError(
+            "test evaluation requires an authenticated analysis-lock receipt; not implemented"
+        )
 
     data = _load(args.features)
     classes = np.asarray(args.classes)

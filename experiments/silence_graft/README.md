@@ -10,7 +10,8 @@ model-control efficacy result exists yet.
 ```bash
 python experiments/silence_graft/build_manifest.py \
   --vad /path/to/two_channel_vad.jsonl \
-  --output /path/to/silence_manifest.jsonl
+  --output /path/to/silence_manifest.jsonl \
+  --hmac-key /private/keys/pilot-hmac.key
 ```
 
 Each VAD row needs explicit `session_id`, `lineage_id`, `source`, `duration_s`,
@@ -19,7 +20,8 @@ and user/assistant interval lists such as
 non-default config.
 
 The command writes the full JSONL plus derived `.pilot.jsonl`, `.splits.json`,
-and `.jsonl.lock.json` artifacts, and refuses to overwrite any of them. Raw
+and HMAC-authenticated `.jsonl.lock.json` artifacts, and refuses to overwrite
+any of them. The mode-`0600`, non-symlink HMAC key is mandatory. Raw
 media, private paths, and annotation exports are not committed. Pilot selection
 targets 75 episodes (review range 60–90) from at least 30 train/development
 lineages, capped at five episodes per lineage. It selects one joint-silence
@@ -44,9 +46,9 @@ other rows:
 {"session_id":"conversation-001","wav_path":"/private/audio/conversation-001.wav","wav_sha256":"<lowercase SHA-256>","user_channel":0,"assistant_channel":1}
 ```
 
-Paths are absolute. Channel numbers are zero-based. The renderer checks the
-source digest before rendering and again after all source reads, and writes the
-prefix channels in user/assistant order.
+Paths are absolute. Channel numbers are zero-based. The renderer opens each unique regular source without following symlinks,
+copies and hashes it once into a private mode-`0600` snapshot, and renders only
+that immutable snapshot. It writes prefix channels in user/assistant order.
 
 ```bash
 python experiments/silence_graft/render_clips.py \
@@ -102,7 +104,7 @@ every pilot session. Sign the private receipt with `sign_receipt` from
 ```
 
 The annotator file is a JSON string list (or `{"annotators": [...]}`) with at
-least three distinct private IDs. Reuse the renderer key:
+least three distinct private IDs and enough reviewers to keep each reviewer to one original item per lineage. Reuse the renderer key:
 
 ```bash
 python experiments/silence_graft/build_assignments.py build \
@@ -117,7 +119,7 @@ python experiments/silence_graft/build_assignments.py build \
 
 The builder verifies both ready renderer packages, renderer/audition HMACs,
 every output hash, source/channel binding, config/protocol link, and opaque item
-HMAC. The two new assignment roots must not be equal or nested. The annotator
+HMAC. It assigns three reviewers per item while preventing any reviewer from seeing two original items from one lineage. The two new assignment roots must not be equal or nested. The annotator
 root contains only `annotators/<opaque>/queue.jsonl`, local presentation media,
 and `READY`; each opaque directory is independently distributable. Public
 queues contain only `assignment_id`, `presentation_id`, a subpackage-relative
@@ -154,6 +156,54 @@ queues expose no item/QC linkage or reveal hash; the release receipt binds the
 media. All package targets are new-only and receive `READY` last. There is
 deliberately no annotation UI.
 
+## R1: compile, report, and adjudicate annotations
+
+Collect one strict `semantic-silence-prefix-response/v1` JSONL row for every
+presentation, then compile it against both unchanged assignment packages:
+
+```bash
+python experiments/silence_graft/compile_annotations.py report \
+  --annotator-root /distribution/pilot-assignments \
+  --coordinator-root /private/data/pilot-assignments \
+  --raw-responses /private/data/raw-responses.jsonl \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --config silence.yaml \
+  --output-dir /private/data/pilot-report
+```
+
+The report command verifies both `READY` packages, their exact authenticated
+file maps, and every assignment/presentation/annotator join. It emits validated
+private annotations, release-compatible completion records and receipt, the
+locked agreement report, and an authenticated agreement receipt. Production uses the configured 10,000 lineage bootstraps. The gate additionally
+requires 60–90 items (target 75), at least 30 lineages, no more than five items per
+lineage, at least 80% pairable items across at least 30 lineages, and at least
+90% valid alpha bootstrap replicates. A Python bootstrap-count override is
+explicitly nonconfirmatory and can never pass the gate; the CLI has no override.
+A failed gate records `new_collapsed_pilot_required`; it never rewrites this
+pilot.
+
+After a passing gate:
+
+```bash
+python experiments/silence_graft/compile_annotations.py adjudicate \
+  --validated-annotations /private/data/pilot-report/validated_annotations.jsonl \
+  --agreement-receipt /private/data/pilot-report/agreement_receipt.json \
+  --hmac-key /private/keys/pilot-hmac.key \
+  --output-dir /private/data/adjudicated
+```
+
+For each no-majority item, also pass `--expert-decisions` and
+`--expert-receipt`. The decision JSONL has exactly `item_id` and a ratable
+`action`. Its signed `semantic-silence-expert-decisions-receipt/v1` receipt has
+`sha256` entries for `expert_decisions`, `agreement_receipt`, and
+`validated_annotations`. Decisions must cover exactly the unresolved items and select an action observed
+for that item. Majority-`UNRATABLE` items are authenticated as excluded. A
+role-separated expert signing key remains a future operational requirement;
+this patch does not treat receipt timestamps as proof of pre-reveal ordering.
+The model-label output contains only causal item/source/lineage/split timing and
+aggregated annotation targets; raw annotator, episode/session, reveal, and
+outcome fields are excluded.
+
 ## R2: screen frozen representations
 
 Create a NumPy `.npz` with aligned arrays:
@@ -173,9 +223,7 @@ python experiments/silence_graft/train_probe.py \
   --output /path/to/development_report.json
 ```
 
-The default evaluates only `development`. Do not use `--evaluate-test` until an
-analysis-lock receipt exists; opening the untouched test split then also
-requires that explicit flag. All feature sets use the same fixed-width linear
+The default evaluates only `development`. `--evaluate-test` currently fails closed; enable it only when authenticated analysis-lock receipt verification is implemented. All feature sets use the same fixed-width linear
 softmax probe; uncertainty is paired by `lineage_id`.
 
 This script is representation screening, not a graft efficacy result. It does

@@ -37,6 +37,7 @@ def test_silence_protocol_config_lock() -> None:
     assert cfg["schema"] == "semantic-silence-config/v1"
     assert cfg["protocol_version"] == "semantic-silence-pilot/v1"
     assert cfg["label_schema"] == "semantic-silence-labels/v1"
+    assert cfg["prefix_response_schema"] == "semantic-silence-prefix-response/v1"
     silence = cfg["silence"]
     assert silence["duration_strata_field"] == "checkpoint_elapsed_s"
     assert silence["duration_strata_s"] == [1.0, 3.0]
@@ -72,6 +73,7 @@ def test_silence_protocol_config_lock() -> None:
         "unit": "lineage",
         "seed": 20261009,
         "replicates": 10000,
+        "min_valid_fraction": 0.90,
     }
 
     media = cfg["pilot_media"]

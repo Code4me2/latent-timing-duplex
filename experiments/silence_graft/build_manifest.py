@@ -8,21 +8,26 @@ import hashlib
 import json
 import math
 import os
-import tempfile
+import secrets
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from latent_timing_duplex.config import find_config, repo_root
+from latent_timing_duplex.config import repo_root
 from latent_timing_duplex.silence import (
     SilenceCheckpoint,
     SilenceContext,
     extract_silence_checkpoints,
     sample_episodes,
 )
+
+try:
+    from experiments.silence_graft.protocol_v1 import load_protocol_v1
+    from experiments.silence_graft.receipts import read_hmac_key, receipt_bytes, sign_receipt
+except ModuleNotFoundError:  # Direct script execution from the repository root.
+    from protocol_v1 import load_protocol_v1
+    from receipts import read_hmac_key, receipt_bytes, sign_receipt
 
 _PROTOCOL = "DATA_LABELING_PROTOCOL.md"
 
@@ -289,11 +294,6 @@ def select_pilot_items(
     return selected
 
 
-def _config_path(value: str | Path) -> Path:
-    path = Path(value)
-    return path.resolve() if path.is_file() else find_config(str(value)).resolve()
-
-
 def _jsonl(rows: Sequence[SilenceCheckpoint], splits: Mapping[str, str]) -> bytes:
     lines = []
     for row in rows:
@@ -320,49 +320,68 @@ def companion_paths(output: Path) -> tuple[Path, Path, Path]:
     return pilot, splits, lock
 
 
-def _sync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def _publish_artifacts(artifacts: Sequence[tuple[Path, bytes]]) -> None:
     directory = artifacts[0][0].parent
+    if any(path.parent != directory for path, _ in artifacts):
+        raise ValueError("all manifest artifacts must share one directory")
     directory.mkdir(parents=True, exist_ok=True)
-    temporary: list[tuple[Path, Path]] = []
-    published: list[Path] = []
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    info = os.fstat(directory_fd)
+    temporary: list[tuple[str, str]] = []
+    published: list[str] = []
     try:
         for path, payload in artifacts:
-            descriptor, name = tempfile.mkstemp(
-                prefix=f".{path.name}.", suffix=".tmp", dir=directory
+            name = f".{path.name}.{secrets.token_hex(8)}.tmp"
+            descriptor = os.open(
+                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=directory_fd,
             )
-            temporary.append((Path(name), path))
+            temporary.append((name, path.name))
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-        for temporary_path, path in temporary:
-            os.link(temporary_path, path)
-            published.append(path)
-            temporary_path.unlink()
-        _sync_directory(directory)
+        for temporary_name, target_name in temporary:
+            os.link(
+                temporary_name, target_name,
+                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            published.append(target_name)
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        current = directory.stat(follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            raise RuntimeError("manifest output directory was replaced")
+        os.fsync(directory_fd)
     except Exception as error:
-        for path in published:
-            path.unlink(missing_ok=True)
-        for temporary_path, _ in temporary:
-            temporary_path.unlink(missing_ok=True)
-        _sync_directory(directory)
+        for name in published:
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        for name, _ in temporary:
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.fsync(directory_fd)
         if isinstance(error, FileExistsError):
             raise FileExistsError(
                 f"refusing to overwrite existing artifact: {error.filename}"
             ) from error
         raise
+    finally:
+        os.close(directory_fd)
 
 
-def build_manifests(vad: Path, output: Path, config: str | Path = "silence.yaml") -> tuple[Path, Path, Path, Path]:
-    """Build all locked artifacts, refusing to replace any existing artifact."""
+def build_manifests(
+    vad: Path,
+    output: Path,
+    config: str | Path = "silence.yaml",
+    *,
+    hmac_key: Path,
+) -> tuple[Path, Path, Path, Path]:
+    """Build and authenticate all locked artifacts without replacing existing ones."""
     vad, output = Path(vad), Path(output)
     pilot_path, splits_path, lock_path = companion_paths(output)
     paths = (output, pilot_path, splits_path, lock_path)
@@ -370,46 +389,27 @@ def build_manifests(vad: Path, output: Path, config: str | Path = "silence.yaml"
     if existing:
         raise FileExistsError(f"refusing to overwrite existing artifact(s): {', '.join(existing)}")
 
-    config_path = _config_path(config)
+    config_path, config_payload, cfg = load_protocol_v1(config)
     protocol_path = repo_root() / "docs" / _PROTOCOL
     vad_payload = vad.read_bytes()
-    config_payload = config_path.read_bytes()
     protocol_payload = protocol_path.read_bytes()
-    cfg = yaml.safe_load(config_payload)
-    if not isinstance(cfg, dict):
-        raise ValueError(f"{config_path} must contain a YAML mapping")
-    for key in ("schema", "protocol_version", "label_schema", "silence", "annotation"):
-        if key not in cfg:
-            raise ValueError(f"config requires {key}")
+    key = read_hmac_key(hmac_key)
     silence, annotation = cfg["silence"], cfg["annotation"]
     checkpoints = silence["checkpoints_s"]
     boundaries = silence["duration_strata_s"]
     labels = silence["duration_strata_labels"]
-    if silence["duration_strata_field"] != "checkpoint_elapsed_s" or silence[
-        "use_realized_duration_for_strata"
-    ]:
-        raise ValueError("pilot strata must use checkpoint elapsed time")
-    if len(labels) != len(boundaries) + 1 or any(
-        not math.isfinite(float(value)) for value in (*checkpoints, *boundaries)
-    ):
-        raise ValueError("invalid checkpoint or elapsed-stratum config")
-    if list(boundaries) != sorted(boundaries):
-        raise ValueError("elapsed-stratum boundaries must be sorted")
-
-    _locked_pilot_splits(
-        annotation["pilot_splits"], annotation["pilot_excluded_sets"]
-    )
     max_per_lineage = silence["max_episodes_per_lineage"]
     split_seed = silence["split_seed"]
     target = annotation["pilot_target_episodes"]
     minimum = annotation["pilot_min_lineages"]
-    if any(
-        isinstance(value, bool) or not isinstance(value, int) or value < 1
-        for value in (max_per_lineage, split_seed, target, minimum)
-    ):
-        raise ValueError("configured caps, seeds, and pilot counts must be positive integers")
 
     sessions = _sessions(vad_payload)
+    lineage_bindings: dict[str, tuple[str, str]] = {}
+    for session in sessions:
+        binding = (session["source"], "challenge" if session["challenge"] else "ordinary")
+        previous = lineage_bindings.setdefault(session["lineage_id"], binding)
+        if previous != binding:
+            raise ValueError("a lineage cannot span sources or challenge status")
     splits = assign_lineage_splits(
         (session["lineage_id"] for session in sessions),
         split_seed,
@@ -497,7 +497,7 @@ def build_manifests(vad: Path, output: Path, config: str | Path = "silence.yaml"
             ),
         },
     }
-    lock_payload = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
+    lock_payload = receipt_bytes(sign_receipt(receipt, key))
 
     _publish_artifacts(
         (
@@ -515,8 +515,9 @@ def main() -> None:
     parser.add_argument("--vad", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--config", default="silence.yaml", help="config path or name")
+    parser.add_argument("--hmac-key", type=Path, required=True)
     args = parser.parse_args()
-    build_manifests(args.vad, args.output, args.config)
+    build_manifests(args.vad, args.output, args.config, hmac_key=args.hmac_key)
 
 
 if __name__ == "__main__":

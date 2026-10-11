@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from experiments.silence_graft import build_assignments as assignments_module
 from experiments.silence_graft import render_clips as renderer_module
 from experiments.silence_graft.build_assignments import _sentinels, build_assignments, release
+from experiments.silence_graft.compile_annotations import adjudicate, report
 from experiments.silence_graft.receipts import receipt_bytes, sign_receipt, verify_receipt
 from experiments.silence_graft.render_clips import render_clips
 
@@ -52,18 +54,14 @@ def _inputs(tmp_path: Path, *, media_updates=None, manifest_updates=None, key_by
     manifest_rows = [
         {
             "context": "joint_silence", "elapsed_s": 0.48,
-            "episode_id": "source-session:episode-1", "lineage_id": "lineage-1",
+            "episode_id": f"episode-{index:03d}",
+            "lineage_id": f"lineage-{index % 30:02d}",
             "model_cutoff_s": 0.625, "onset_s": 0.145, "right_censored": False,
-            "session_id": "source-session", "silence_end_s": 1.75,
-            "source": "test-corpus", "split": "train",
-        },
-        {
-            "context": "joint_silence", "elapsed_s": 0.48,
-            "episode_id": "source-session:episode-2", "lineage_id": "lineage-1",
-            "model_cutoff_s": 1.125, "onset_s": 0.645, "right_censored": False,
-            "session_id": "source-session", "silence_end_s": 1.75,
-            "source": "test-corpus", "split": "development",
-        },
+            "session_id": f"source-session-{index:03d}", "silence_end_s": 1.75,
+            "source": "test-corpus",
+            "split": "train" if index % 30 < 15 else "development",
+        }
+        for index in range(75)
     ]
     if manifest_updates:
         manifest_rows[0].update(manifest_updates)
@@ -71,24 +69,35 @@ def _inputs(tmp_path: Path, *, media_updates=None, manifest_updates=None, key_by
     manifest = tmp_path / "manifest.pilot.jsonl"
     manifest.write_bytes(manifest_payload)
     lock = tmp_path / "manifest.jsonl.lock.json"
-    lock.write_text(json.dumps({
+    lock.write_bytes(receipt_bytes(sign_receipt({
         "schema": "semantic-silence-config/v1",
         "protocol_version": "semantic-silence-pilot/v1",
         "label_schema": "semantic-silence-labels/v1",
         "sha256": {
+            "input_vad": "1" * 64,
+            "full_manifest": "2" * 64,
+            "splits": "3" * 64,
             "pilot_manifest": hashlib.sha256(manifest_payload).hexdigest(),
             "config": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
             "protocol_doc": hashlib.sha256(PROTOCOL.read_bytes()).hexdigest(),
         },
-    }), encoding="utf-8")
-    media_row = {
-        "assistant_channel": 0, "session_id": "source-session", "user_channel": 1,
+        "counts": {
+            "input_sessions": 75, "input_lineages": 30,
+            "split_lineages": {"development": 15, "train": 15},
+            "full_episodes": 75, "full_checkpoints": 75,
+            "pilot_episodes": 75, "pilot_checkpoints": 75, "pilot_lineages": 30,
+            "pilot_by_source": {"test-corpus": 75},
+            "pilot_by_elapsed_stratum": {"<1s": 75},
+        },
+    }, key_bytes if len(key_bytes) >= 32 else KEY_BYTES)))
+    media_rows = [{
+        "assistant_channel": 0, "session_id": row["session_id"], "user_channel": 1,
         "wav_path": str(wav.resolve()), "wav_sha256": hashlib.sha256(wav.read_bytes()).hexdigest(),
-    }
+    } for row in manifest_rows]
     if media_updates:
-        media_row.update(media_updates)
+        media_rows[0].update(media_updates)
     media = tmp_path / "media.jsonl"
-    media.write_bytes(_jsonl([media_row]))
+    media.write_bytes(_jsonl(media_rows))
     key = tmp_path / "hmac.key"
     key.write_bytes(key_bytes)
     key.chmod(0o600)
@@ -107,17 +116,17 @@ def _audition(coordinator: Path, key: Path, path: Path, *, session_updates=None,
     index = coordinator / "coordinator_media_index.jsonl"
     source_map = coordinator / "private_source_mapping.jsonl"
     renderer_receipt = coordinator / "renderer_receipt.json"
-    source = _rows(source_map)[0]
-    session = {
+    sources = _rows(source_map)
+    sessions = [{
         "assistant_channel": source["assistant_channel"],
         "assistant_channel_auditioned": True,
         "session_id": source["session_id"],
         "user_channel": source["user_channel"],
         "user_channel_auditioned": True,
         "wav_sha256": source["wav_sha256"],
-    }
+    } for source in sources]
     if session_updates:
-        session.update(session_updates)
+        sessions[0].update(session_updates)
     hashes = {
         "config": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
         "coordinator_media_index": hashlib.sha256(index.read_bytes()).hexdigest(),
@@ -131,7 +140,7 @@ def _audition(coordinator: Path, key: Path, path: Path, *, session_updates=None,
         "auditor_identity": "auditor-1",
         "protocol_version": "semantic-silence-pilot/v1",
         "schema": "semantic-silence-channel-audition/v1",
-        "sessions": [session],
+        "sessions": sessions,
         "sha256": hashes,
     }, key.read_bytes())
     path.write_bytes(receipt_bytes(signed))
@@ -141,7 +150,10 @@ def _audition(coordinator: Path, key: Path, path: Path, *, session_updates=None,
 def _assignment_inputs(tmp_path: Path, *, audition_updates=None):
     prefix, coordinator, key, _ = _render(tmp_path)
     annotators = tmp_path / "annotators.json"
-    annotators.write_text(json.dumps(["alice", "bob", "carol"]), encoding="utf-8")
+    annotators.write_text(
+        json.dumps(["alice", "bob", "carol", "dana", "erin", "frank", "grace", "heidi", "ivan"]),
+        encoding="utf-8",
+    )
     audition = _audition(coordinator, key, tmp_path / "audition.json", session_updates=audition_updates)
     return prefix, coordinator, annotators, key, audition
 
@@ -194,11 +206,12 @@ def test_renders_separate_frame_exact_signed_packages(tmp_path: Path) -> None:
     receipt = json.loads((coordinator / "renderer_receipt.json").read_text())
     verify_receipt(receipt, key.read_bytes(), "renderer receipt")
     assert receipt["key_fingerprint"] == hashlib.sha256(key.read_bytes()).hexdigest()
-    assert receipt["sources"] == [{
-        "assistant_channel": 0, "session_id": "source-session", "user_channel": 1,
+    assert len(receipt["sources"]) == 75
+    assert receipt["sources"][0] == {
+        "assistant_channel": 0, "session_id": "source-session-000", "user_channel": 1,
         "wav_sha256": mapping[0]["wav_sha256"],
-    }]
-    assert mapping[0]["lineage_id"] == "lineage-1"
+    }
+    assert mapping[0]["lineage_id"] == "lineage-00"
 
 
 def test_media_hash_and_post_read_mutation_are_rejected(tmp_path: Path, monkeypatch) -> None:
@@ -220,9 +233,9 @@ def test_media_hash_and_post_read_mutation_are_rejected(tmp_path: Path, monkeypa
         return result
 
     monkeypatch.setattr(renderer_module, "_read_channels", mutate)
-    with pytest.raises(ValueError, match="changed during rendering"):
-        render_clips(manifest, lock, media, tmp_path / "p2", tmp_path / "c2", key)
-    assert not (tmp_path / "p2").exists() and not (tmp_path / "c2").exists()
+    render_clips(manifest, lock, media, tmp_path / "p2", tmp_path / "c2", key)
+    assert (tmp_path / "p2" / "READY").is_file()
+    assert (tmp_path / "c2" / "READY").is_file()
 
 
 @pytest.mark.parametrize("missing", ["schema", "protocol_version", "label_schema", "pilot_manifest", "config", "protocol_doc"])
@@ -237,8 +250,8 @@ def test_lock_fields_and_digests_are_mandatory(tmp_path: Path, missing: str) -> 
 
 def test_exact_media_sessions_manifest_lineage_and_strong_key_are_required(tmp_path: Path) -> None:
     manifest, lock, media, key, _ = _inputs(tmp_path / "extra")
-    row = json.loads(media.read_text().splitlines()[0])
-    media.write_bytes(_jsonl([row, {**row, "session_id": "extra"}]))
+    rows = _rows(media)
+    media.write_bytes(_jsonl([*rows, {**rows[0], "session_id": "extra"}]))
     with pytest.raises(ValueError, match="non-pilot"):
         render_clips(manifest, lock, media, tmp_path / "p", tmp_path / "c", key)
 
@@ -252,8 +265,26 @@ def test_exact_media_sessions_manifest_lineage_and_strong_key_are_required(tmp_p
 
     manifest, lock, media, key, _ = _inputs(tmp_path / "permissions")
     key.chmod(0o644)
-    with pytest.raises(ValueError, match="group or other users"):
+    with pytest.raises(ValueError, match="mode 0600"):
         render_clips(manifest, lock, media, tmp_path / "p4", tmp_path / "c4", key)
+
+
+def test_renderer_rejects_source_and_key_symlinks(tmp_path: Path) -> None:
+    manifest, lock, media, key, wav = _inputs(tmp_path / "source")
+    linked_wav = tmp_path / "source" / "linked.wav"
+    linked_wav.symlink_to(wav)
+    rows = _rows(media)
+    for row in rows:
+        row["wav_path"] = str(linked_wav.absolute())
+    media.write_bytes(_jsonl(rows))
+    with pytest.raises(ValueError, match="non-symlink"):
+        render_clips(manifest, lock, media, tmp_path / "source-prefix", tmp_path / "source-coordinator", key)
+
+    manifest, lock, media, key, _ = _inputs(tmp_path / "key")
+    linked_key = tmp_path / "key" / "linked.key"
+    linked_key.symlink_to(key)
+    with pytest.raises(ValueError, match="non-symlink"):
+        render_clips(manifest, lock, media, tmp_path / "key-prefix", tmp_path / "key-coordinator", linked_key)
 
 
 def test_renderer_rejects_elapsed_silence_beyond_prefix(tmp_path: Path) -> None:
@@ -277,10 +308,22 @@ def test_builds_private_qc_map_and_minimal_aliased_public_queues(tmp_path: Path)
         path.read_bytes() for path in _queue_paths(second_public)
     ]
     private = _rows(first_private / "private_assignment_source_map.jsonl")
+    assert all(
+        row["checkpoint_elapsed_s"] == row["elapsed_s"] == 0.48
+        and row["model_cutoff_s"] - row["onset_s"] == pytest.approx(row["elapsed_s"])
+        for row in private
+    )
     originals = [row for row in private if not row["repeat"]]
     assert all(len({row["annotator_id"] for row in originals if row["item_id"] == item}) == 3 for item in {row["item_id"] for row in originals})
     loads = Counter(row["annotator_id"] for row in originals)
     assert max(loads.values()) - min(loads.values()) <= 1
+    assert all(
+        len(rows) == len({row["lineage_id"] for row in rows})
+        for rows in (
+            [row for row in originals if row["annotator_id"] == annotator]
+            for annotator in loads
+        )
+    )
 
     allowed = {"assignment_id", "prefix_clip", "presentation_id", "protocol_version", "schema"}
     public = [row for path in _queue_paths(first_public) for row in _rows(path)]
@@ -334,6 +377,16 @@ def test_assignment_requires_authenticated_exact_session_audition(tmp_path: Path
 
 def test_repeat_and_sentinel_config_are_enforced(tmp_path: Path) -> None:
     prefix, coordinator, annotators, key, audition = _assignment_inputs(tmp_path)
+    annotators.write_text(json.dumps(["alice", "bob", "carol"]), encoding="utf-8")
+    with pytest.raises(ValueError, match="lineage-independent"):
+        build_assignments(
+            prefix, coordinator, annotators, key, audition,
+            tmp_path / "small-pool-public", tmp_path / "small-pool-private",
+        )
+    annotators.write_text(
+        json.dumps(["alice", "bob", "carol", "dana", "erin", "frank", "grace", "heidi", "ivan"]),
+        encoding="utf-8",
+    )
     bad_config = tmp_path / "bad.yaml"
     bad_config.write_text(CONFIG.read_text().replace("repeat_fraction: 0.05", "repeat_fraction: 0.10"), encoding="utf-8")
     with pytest.raises(ValueError, match="exactly 0.05"):
@@ -437,6 +490,131 @@ def test_release_verifies_completion_hmac_and_exact_reveal_map_hash(tmp_path: Pa
         release(annotator_assignments, coordinator_assignments, completions, receipt, key, tmp_path / "bad-map")
 
 
+def test_annotation_report_release_and_adjudication_end_to_end(tmp_path: Path) -> None:
+    annotator_root, coordinator_root = _build_assignments(tmp_path)
+    key = tmp_path / "hmac.key"
+    assignments = _rows(coordinator_root / "private_assignment_source_map.jsonl")
+    item_actions = {
+        item: ("wait" if index % 2 == 0 else "respond")
+        for index, item in enumerate(sorted({row["item_id"] for row in assignments}))
+    }
+    responses = []
+    for row in assignments:
+        action = item_actions[row["item_id"]]
+        responses.append({
+            "schema": "semantic-silence-prefix-response/v1",
+            "protocol_version": "semantic-silence-pilot/v1",
+            "assignment_id": row["assignment_id"],
+            "presentation_id": row["presentation_id"],
+            "annotator_id": row["annotator_id"],
+            "action": action,
+            "confidence": 4,
+            "also_acceptable": [],
+            "tags": ["floor_holding"],
+            "acceptable_onset": (
+                {
+                    "earliest_elapsed_s": None,
+                    "latest_elapsed_s": None,
+                    "wait_for_user_resume": True,
+                }
+                if action == "wait"
+                else {
+                    "earliest_elapsed_s": 0.48,
+                    "latest_elapsed_s": 1.0,
+                    "wait_for_user_resume": False,
+                }
+            ),
+            "quality": "clean",
+            "ratable": True,
+        })
+    raw = tmp_path / "raw.jsonl"
+    raw.write_bytes(_jsonl(responses))
+    report_root = report(
+        annotator_root, coordinator_root, raw, key, CONFIG,
+        tmp_path / "annotation-report",
+    )
+    agreement = json.loads((report_root / "agreement_receipt.json").read_text())
+    verify_receipt(agreement, key.read_bytes(), "agreement receipt")
+    assert agreement["gate_passed"] is True
+
+    released = release(
+        annotator_root, coordinator_root, report_root / "completions.jsonl",
+        report_root / "completion_receipt.json", key, tmp_path / "released-from-compiler",
+    )
+    assert (released / "READY").is_file()
+
+    labels_root = adjudicate(
+        report_root / "validated_annotations.jsonl",
+        report_root / "agreement_receipt.json", key, tmp_path / "adjudicated",
+    )
+    labels = _rows(labels_root / "adjudicated.jsonl")
+    assert {row["action"] for row in labels} == {"wait", "respond"}
+    forbidden = {"episode_id", "session_id", "silence_end_s", "annotator_id", "onset_s"}
+    assert all(not forbidden.intersection(row) for row in labels)
+    verify_receipt(
+        json.loads((labels_root / "adjudication_receipt.json").read_text()),
+        key.read_bytes(), "adjudication receipt",
+    )
+
+
+def test_failed_gate_and_all_different_require_new_pilot_or_expert(tmp_path: Path) -> None:
+    annotator_root, coordinator_root = _build_assignments(tmp_path)
+    key = tmp_path / "hmac.key"
+    assignments = _rows(coordinator_root / "private_assignment_source_map.jsonl")
+    by_item = {}
+    for row in assignments:
+        if not row["repeat"]:
+            by_item.setdefault(row["item_id"], []).append(row["annotator_id"])
+    action = {
+        (item, annotator): ["wait", "ack", "respond"][index]
+        for item, annotators in by_item.items()
+        for index, annotator in enumerate(sorted(annotators))
+    }
+    responses = [{
+        "schema": "semantic-silence-prefix-response/v1",
+        "protocol_version": "semantic-silence-pilot/v1",
+        "assignment_id": row["assignment_id"],
+        "presentation_id": row["presentation_id"],
+        "annotator_id": row["annotator_id"],
+        "action": action[(row["item_id"], row["annotator_id"])],
+        "confidence": 3,
+        "also_acceptable": [],
+        "tags": [],
+        "acceptable_onset": {
+            "earliest_elapsed_s": None,
+            "latest_elapsed_s": None,
+            "wait_for_user_resume": True,
+        },
+        "quality": "clean",
+        "ratable": True,
+    } for row in assignments]
+    raw = tmp_path / "raw.jsonl"
+    raw.write_bytes(_jsonl(responses))
+    report_root = report(
+        annotator_root, coordinator_root, raw, key, CONFIG,
+        tmp_path / "failed-report", bootstrap_replicates=2,
+    )
+    receipt_path = report_root / "agreement_receipt.json"
+    failed = json.loads(receipt_path.read_text())
+    assert failed["gate_passed"] is False
+    assert failed["bootstrap"]["nonconfirmatory_override"] is True
+    assert failed["collapse_decision"] == "nonconfirmatory"
+    with pytest.raises(ValueError, match="nonconfirmatory|gate did not pass"):
+        adjudicate(
+            report_root / "validated_annotations.jsonl", receipt_path, key,
+            tmp_path / "forbidden-adjudication",
+        )
+
+    failed.pop("hmac_sha256")
+    failed["gate_passed"] = True
+    receipt_path.write_bytes(receipt_bytes(sign_receipt(failed, key.read_bytes())))
+    with pytest.raises(ValueError, match="nonconfirmatory"):
+        adjudicate(
+            report_root / "validated_annotations.jsonl", receipt_path, key,
+            tmp_path / "missing-expert",
+        )
+
+
 def test_existing_targets_are_never_overwritten(tmp_path: Path) -> None:
     manifest, lock, media, key, _ = _inputs(tmp_path)
     prefix = tmp_path / "prefix"
@@ -456,6 +634,45 @@ def test_existing_targets_are_never_overwritten(tmp_path: Path) -> None:
     completions, receipt = _completion_files(tmp_path, coordinator_assignments, assignment_key, rows)
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         release(annotator_assignments, coordinator_assignments, completions, receipt, assignment_key, output)
+
+
+def test_multi_package_publication_removes_ready_markers_on_late_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manifest, lock, media, key, _ = _inputs(tmp_path / "renderer-input")
+    original_render_publish = renderer_module._publish_staging
+    calls = 0
+
+    def fail_second_render(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected publication failure")
+        return original_render_publish(*args, **kwargs)
+
+    monkeypatch.setattr(renderer_module, "_publish_staging", fail_second_render)
+    prefix, coordinator = tmp_path / "failed-prefix", tmp_path / "failed-coordinator"
+    with pytest.raises(RuntimeError, match="injected"):
+        render_clips(manifest, lock, media, prefix, coordinator, key)
+    assert not (prefix / "READY").exists()
+    assert not (coordinator / "READY").exists()
+
+    first, second = tmp_path / "first-package", tmp_path / "second-package"
+    original_assignment_publish = assignments_module._publish_staging
+    calls = 0
+
+    def fail_second_assignment(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected assignment publication failure")
+        return original_assignment_publish(*args, **kwargs)
+
+    monkeypatch.setattr(assignments_module, "_publish_staging", fail_second_assignment)
+    with pytest.raises(RuntimeError, match="injected"):
+        assignments_module._publish_packages({first: {"one": b"1"}, second: {"two": b"2"}})
+    assert not (first / "READY").exists()
+    assert not (second / "READY").exists()
 
 
 def test_assignment_roots_refuse_nesting_overwrite_and_unrecorded_public_files(tmp_path: Path) -> None:

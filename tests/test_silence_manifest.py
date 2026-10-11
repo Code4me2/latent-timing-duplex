@@ -18,6 +18,7 @@ from experiments.silence_graft.build_manifest import (
     elapsed_stratum,
     select_pilot_items,
 )
+from experiments.silence_graft.receipts import verify_receipt
 from latent_timing_duplex.silence import extract_silence_checkpoints, sample_episodes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,7 +160,10 @@ def test_locked_outputs_are_deterministic_hashed_and_never_overwritten(tmp_path:
         directory.mkdir()
         vad = directory / "vad.jsonl"
         vad.write_text(_corpus(), encoding="utf-8")
-        outputs.append(build_manifests(vad, directory / "manifest.jsonl"))
+        key = directory / "hmac.key"
+        key.write_bytes(b"manifest-test-key-material-at-least-32-bytes")
+        key.chmod(0o600)
+        outputs.append(build_manifests(vad, directory / "manifest.jsonl", hmac_key=key))
 
     for first, second in zip(outputs[0], outputs[1]):
         assert first.read_bytes() == second.read_bytes()
@@ -183,6 +187,7 @@ def test_locked_outputs_are_deterministic_hashed_and_never_overwritten(tmp_path:
     assert max(map(len, episodes_by_lineage.values())) <= 5
 
     receipt = json.loads(lock_path.read_text(encoding="utf-8"))
+    verify_receipt(receipt, (tmp_path / "first" / "hmac.key").read_bytes(), "manifest lock")
     hashes = receipt["sha256"]
     assert hashes["input_vad"] == hashlib.sha256((tmp_path / "first" / "vad.jsonl").read_bytes()).hexdigest()
     assert hashes["config"] == hashlib.sha256((ROOT / "configs" / "silence.yaml").read_bytes()).hexdigest()
@@ -195,7 +200,10 @@ def test_locked_outputs_are_deterministic_hashed_and_never_overwritten(tmp_path:
 
     assert companion_paths(full_path) == outputs[0][1:]
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
-        build_manifests(tmp_path / "first" / "vad.jsonl", full_path)
+        build_manifests(
+            tmp_path / "first" / "vad.jsonl", full_path,
+            hmac_key=tmp_path / "first" / "hmac.key",
+        )
 
 
 def test_split_assignment_is_lineage_total_and_deterministic() -> None:
@@ -217,8 +225,11 @@ def test_locked_config_cannot_select_test(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="exactly train and development"):
-        build_manifests(vad, tmp_path / "manifest.jsonl", config)
+    key = tmp_path / "hmac.key"
+    key.write_bytes(b"manifest-test-key-material-at-least-32-bytes")
+    key.chmod(0o600)
+    with pytest.raises(ValueError, match="pilot_splits"):
+        build_manifests(vad, tmp_path / "manifest.jsonl", config, hmac_key=key)
 
 
 def test_failed_publication_removes_partial_outputs(tmp_path: Path, monkeypatch) -> None:
@@ -227,12 +238,12 @@ def test_failed_publication_removes_partial_outputs(tmp_path: Path, monkeypatch)
     original = module.os.link
     calls = 0
 
-    def fail_second_link(source, destination):
+    def fail_second_link(source, destination, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("simulated publication failure")
-        return original(source, destination)
+        return original(source, destination, **kwargs)
 
     monkeypatch.setattr(module.os, "link", fail_second_link)
     artifacts = [

@@ -37,6 +37,10 @@ class GateState(str, Enum):
     REPAIR = "repair"
 
 
+ASSIGNED_PREFIX_SCHEMA = "semantic-silence-prefix-response/v1"
+SILENCE_PILOT_PROTOCOL = "semantic-silence-pilot/v1"
+
+
 @dataclass(frozen=True)
 class SilenceCheckpoint:
     """One causal decision point during a user-inactive interval."""
@@ -138,6 +142,71 @@ class SilenceAnnotation:
         )
         if earliest is not None and earliest + 1e-9 < self.checkpoint_elapsed_s:
             raise ValueError("acceptable onset cannot precede the model checkpoint")
+
+
+@dataclass(frozen=True)
+class AssignedSilenceAnnotation:
+    """A locked prefix response keyed only by blinded assignment identity."""
+
+    assignment_id: str
+    presentation_id: str
+    annotator_id: str
+    action: SilenceAction
+    confidence: int
+    also_acceptable: tuple[SilenceAction, ...]
+    tags: tuple[str, ...]
+    acceptable_onset: AcceptableOnset | None
+    quality: SilenceQuality
+    ratable: bool
+    schema: str = ASSIGNED_PREFIX_SCHEMA
+    protocol_version: str = SILENCE_PILOT_PROTOCOL
+    row_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.schema != ASSIGNED_PREFIX_SCHEMA:
+            raise ValueError(f"schema must be {ASSIGNED_PREFIX_SCHEMA!r}")
+        if self.protocol_version != SILENCE_PILOT_PROTOCOL:
+            raise ValueError(f"protocol_version must be {SILENCE_PILOT_PROTOCOL!r}")
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.assignment_id, self.presentation_id, self.annotator_id)
+        ):
+            raise ValueError("assignment, presentation, and annotator IDs are required")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, int):
+            raise ValueError("confidence must be an integer")
+        if not 1 <= self.confidence <= 5:
+            raise ValueError("confidence must be in [1, 5]")
+        if not isinstance(self.ratable, bool):
+            raise ValueError("ratable must be a boolean")
+        if len(self.also_acceptable) > 1:
+            raise ValueError("also_acceptable must contain zero or one action")
+        if len(set(self.also_acceptable)) != len(self.also_acceptable):
+            raise ValueError("also_acceptable actions must be distinct")
+        if self.action in self.also_acceptable or SilenceAction.UNRATABLE in self.also_acceptable:
+            raise ValueError("also_acceptable must contain a distinct ratable action")
+        if len(set(self.tags)) != len(self.tags):
+            raise ValueError("tags must be distinct")
+        if self.quality is SilenceQuality.UNREVIEWED:
+            raise ValueError("assigned responses require a reviewed quality")
+        if self.ratable == (self.action is SilenceAction.UNRATABLE):
+            raise ValueError("unratable rows must use action='unratable' and vice versa")
+        if self.ratable != (self.acceptable_onset is not None):
+            raise ValueError("ratable rows require onset guidance; unratable rows cannot have it")
+        if not self.ratable and self.also_acceptable:
+            raise ValueError("unratable rows cannot have an alternate action")
+        if self.row_sha256 is not None and (
+            len(self.row_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.row_sha256)
+        ):
+            raise ValueError("row_sha256 must be a lowercase SHA-256 digest")
+
+    @property
+    def annotation_sha256(self) -> str | None:
+        """Digest copied into the coordinator completion-lock record."""
+        return self.row_sha256
+
+
+AssignedPrefixAnnotation = AssignedSilenceAnnotation
 
 
 @dataclass(frozen=True)

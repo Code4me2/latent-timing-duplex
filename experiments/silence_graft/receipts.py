@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import stat
 from collections.abc import Mapping
@@ -34,13 +35,23 @@ def require_digest(value: Any, where: str) -> str:
 
 
 def read_hmac_key(path: str | Path) -> bytes:
-    key_path = Path(path)
-    info = key_path.stat(follow_symlinks=False)
-    if not stat.S_ISREG(info.st_mode) or key_path.is_symlink():
-        raise ValueError("HMAC key must be a regular non-symlink file")
-    if stat.S_IMODE(info.st_mode) & 0o077:
-        raise ValueError("HMAC key must not be accessible by group or other users")
-    key = key_path.read_bytes()
+    """Read one immutable key file descriptor, rejecting links and loose modes."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ValueError("HMAC key must be a readable regular non-symlink file") from error
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("HMAC key must be a regular non-symlink file")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("HMAC key must have mode 0600")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        key = b"".join(chunks)
+    finally:
+        os.close(descriptor)
     if len(key) < 32:
         raise ValueError("HMAC key must be at least 32 bytes")
     return key
