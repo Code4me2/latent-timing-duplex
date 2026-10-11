@@ -1,9 +1,10 @@
 # Causal semantic-silence graft protocol
 
-This protocol implements R1 of [RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md).
-The operational collection manual is
-[DATA_LABELING_PROTOCOL.md](DATA_LABELING_PROTOCOL.md). It does not claim that
-silence semantics are already recoverable.
+This protocol is the R1 scaffold from
+[RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md). The operational collection manual
+is [DATA_LABELING_PROTOCOL.md](DATA_LABELING_PROTOCOL.md). The R1 gate remains
+open until a real pilot agreement receipt passes; this scaffold does not claim
+that silence semantics are already recoverable.
 
 ## Unit of analysis
 
@@ -21,7 +22,9 @@ Each checkpoint records:
 
 `silence_end_s` is outcome metadata. It may be used to score a prediction, but
 must never enter checkpoint features. Every extracted feature must declare
-`available_at_s <= model_cutoff_s`.
+`available_at_s <= model_cutoff_s`. Reporting strata use only checkpoint elapsed
+time: `<1s`, `1–<3s`, and `>=3s`; realized silence duration never determines a
+stratum.
 
 Assistant-speaking checkpoints are retained as LISTEN controls but excluded
 from joint-silence semantic metrics.
@@ -62,22 +65,35 @@ not additional primary classes.
 The primary action must be submitted from prefix-only context and locked before
 later user audio is revealed. Future context may support separately named
 retrospective tags, but cannot revise the primary action or enter model
-features. `wait_for_user_resume=true` is mutually exclusive with an onset
+features. Acceptable onset is normative interval-censored assistant-entry
+supervision, not recorded-partner imitation. Recorded partner onset is outcome
+metadata only. `wait_for_user_resume=true` is mutually exclusive with an onset
 interval; otherwise the earliest acceptable onset must not precede the
-annotated checkpoint.
+annotated checkpoint. At the same nearest-sample boundary, user resumption
+cancels assistant entry.
 
 ## Pilot and split lock
 
-Sample 60–90 episodes, balanced across corpus and duration strata, with at most
-five episodes from one source conversation. Three annotators label every item.
-Lock development and untouched test partitions by `lineage_id` before model
-training. A source conversation or podcast episode may appear in only one
-partition.
+Target 75 episodes (allowed coordinator review range 60–90) from at least 30
+lineages, balanced across corpus and checkpoint-elapsed-time duration strata,
+with at most five episodes per lineage. Draw only from train/development; the
+untouched test and challenge sets are excluded. Three annotators label every
+item. Lock partitions by `lineage_id` before model training. A source
+conversation or podcast episode may appear in only one partition.
 
-Continue with the five actions only if Krippendorff α for primary action is at
-least 0.80. Otherwise collapse once to `WAIT / RESPOND / REPAIR` and repeat the
-reliability check. Do not respond to persistent disagreement by scaling the
-model.
+The pilot is audio-only: fixed 20-second prefix, fixed 8-second user-only reveal
+clipped at session end, no transcript, nearest-sample boundary rounding, and no
+gain change (`gain_db: 0.0` at conversation/session scope). Repeat 5% of
+assignments. Add no automatic sentinels unless the coordinator supplies a
+locked sentinel list.
+
+Use nominal Krippendorff α for primary action with `UNRATABLE` missing, plus
+per-class positive agreement, onset endpoint disagreement, repeat consistency,
+and lineage-bootstrap intervals (seed `20261009`, 10,000 replicates). Continue
+with the original taxonomy only if α is at least 0.80. Otherwise collapse
+exactly as `ACK→RESPOND`, `WAIT→WAIT`, `RESPOND→RESPOND`, and `REPAIR→REPAIR`.
+A failed five-class pilot cannot be reused for collapsed reliability; run a new
+pilot. Do not respond to persistent disagreement by scaling the model.
 
 ## Gate simulator
 
@@ -96,7 +112,7 @@ archives with `available_at_s > model_cutoff_s` are rejected.
 
 The probe report cannot by itself pass the R2 efficacy gate: acceptable-onset
 and interruption outcomes still require replay. Opening the untouched test
-split requires an explicit flag after the analysis is locked.
+split requires both an analysis-lock receipt and the explicit test flag.
 
 ## Explicit exclusions
 

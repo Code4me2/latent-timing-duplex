@@ -28,7 +28,8 @@ def test_current_status_names_the_real_target_and_non_claims() -> None:
 def test_roadmap_keeps_future_stages_gated() -> None:
     roadmap = (ROOT / "docs" / "RESEARCH_ROADMAP.md").read_text(encoding="utf-8")
     assert "silence-state and competing-hazard sidecar" in roadmap
-    assert "future PR #11" in roadmap
+    assert "### R3 — oracle and predicted native gate" in roadmap
+    assert "PR #" not in roadmap
     assert "Created only after R1/R2 gates pass" in roadmap
     assert "do not post-hoc mute" in " ".join(roadmap.lower().split())
 

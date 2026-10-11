@@ -1,7 +1,7 @@
 # Semantic-silence dataset and labeling protocol
 
-**Status:** draft for review; do not begin the full annotation run until the
-pilot section is approved.  
+**Status:** R1 scaffold; the construct/data gate remains open until a real
+pilot agreement receipt passes the criteria in §13.
 **Protocol version:** `semantic-silence-labels/v1`  
 **Related:** [SILENCE_GRAFT.md](SILENCE_GRAFT.md),
 [RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md)
@@ -72,6 +72,15 @@ the session boundary. Generate decision checkpoints from
 Do not strip breaths, fillers, laughter, or hesitation sounds before candidate
 construction. They may be interactionally meaningful.
 
+Duration strata are locked to checkpoint elapsed time, never realized silence
+duration:
+
+| Stratum | `checkpoint_elapsed_s` |
+|---|---|
+| short | `< 1.0` |
+| medium | `>= 1.0` and `< 3.0` |
+| long | `>= 3.0` |
+
 Input two-channel VAD JSONL:
 
 ```json
@@ -113,11 +122,17 @@ test         15%
 Requirements:
 
 - one source conversation/podcast appears in one split only;
-- sample no more than five episodes from a source lineage;
-- balance the pilot across corpus and duration strata;
+- sample no more than five episodes per `lineage_id`;
+- balance the pilot across corpus and checkpoint-elapsed-time duration strata;
+- draw pilot items only from train and development;
 - retain a natural-prevalence untouched test set;
 - report any long-pause or rare-action enrichment as a separate challenge set;
+- exclude untouched test and challenge items from the pilot;
 - keep test media and labels unavailable to the model-development process.
+
+Test evaluation requires an analysis-lock receipt fixed before test labels or
+results are opened. The receipt must identify the manifest, exclusions,
+taxonomy, metrics, and analysis code/config hashes.
 
 Multiple checkpoints from one episode are correlated. Evaluation and
 uncertainty must group by source lineage, not treat checkpoints as independent.
@@ -126,25 +141,28 @@ uncertainty must group by source lineage, not treat checkpoints as independent.
 
 ### 6.1 Prefix clip
 
-Render approximately 15–30 seconds of context ending exactly at
-`model_cutoff_s`:
+The pilot is audio-only. Render a fixed 20-second prefix ending exactly at
+`model_cutoff_s`, clipped only at session start:
 
 - preserve both channels and speaker identity;
 - include the full elapsed silence up to the checkpoint;
-- include transcript text only through the cutoff, if transcript is shown;
+- show no transcript;
 - do not expose numeric pause duration, next-speaker identity, or future text;
 - do not trim VAD gaps;
-- do not normalize each clip independently or remove quiet interactional cues.
+- do not normalize or otherwise change gain.
 
-Use one consistent conversation-level gain policy. The interface should mark
-which channel is the prospective user and which is the assistant/partner.
+Keep source conversation/session gain unchanged (`gain_db: 0.0`). Convert all
+clip boundaries to sample indices with nearest-sample rounding. The interface
+should mark which channel is the prospective user and which is the
+assistant/partner.
 
 ### 6.2 Reveal clip
 
-After all applicable prefix labels are locked, reveal the user channel from the
-checkpoint through the next 3–10 seconds or the next user utterance. Initially
-mask the recorded partner's future response so annotators do not imitate it.
-Recorded assistant onset is measured automatically from the source timeline.
+After all applicable prefix labels are locked, reveal a fixed 8 seconds of the
+user channel starting at the checkpoint, clipped at session end. Show no
+recorded-partner channel and no transcript. Recorded partner onset is measured
+automatically from the source timeline and stored only as an outcome; it is
+never annotation supervision or evidence.
 
 ### 6.3 Assignment and blinding
 
@@ -183,7 +201,9 @@ label; confidence and alternatives preserve genuine ambiguity.
 
 ## 8. Acceptable onset
 
-For a ratable item, record either:
+Acceptable onset is a normative, interval-censored assistant-entry supervision
+target, not a reconstruction of when the recorded partner spoke. For a ratable
+item, record either:
 
 - earliest and latest acceptable assistant onset, in seconds after silence
   onset; or
@@ -192,7 +212,9 @@ For a ratable item, record either:
 
 An onset window cannot begin before the annotated checkpoint. A `WAIT` label
 may still have a later acceptable onset window if waiting is appropriate now
-but indefinite waiting is not. `UNRATABLE` items have no onset target.
+but indefinite waiting is not. `UNRATABLE` items have no onset target. In replay,
+a user-resumption/assistant-entry tie at the same rounded sample cancels the
+assistant entry.
 
 Example:
 
@@ -282,38 +304,53 @@ Before the pilot:
 
 1. review the action definitions and boundary cases;
 2. complete 15–20 training examples with explanations;
-3. pass audio/channel and obvious-action sentinel checks;
+3. pass audio/channel checks;
 4. confirm they understand that the prefix answer cannot use future context.
 
-During labeling, include sparse repeated items to measure intra-annotator
-consistency and sentinel items to detect playback or attention failures. Do not
-use model predictions as hidden gold answers.
+Repeat 5% of assignments to measure intra-annotator consistency. Do not insert
+automatic sentinels. Sentinels are allowed only when the coordinator supplies a
+sentinel list locked before assignment; record its receipt. Do not use model
+predictions as hidden gold answers.
 
 ## 13. Pilot, agreement, and collapse rule
 
-Pilot 60–90 episodes from at least 30 source lineages, with every selected
-checkpoint labeled independently by three annotators. This will usually yield
-roughly 150–250 checkpoint items.
+Target 75 episodes, with a coordinator review range of 60–90 episodes, from at
+least 30 source lineages. Use train/development episodes only, cap selection at
+five episodes per lineage, and have three annotators label every selected
+checkpoint. Untouched test and challenge items are excluded.
 
-Before adjudication, report:
+Before adjudication, report the locked analyses:
 
-- Krippendorff's alpha for primary action;
-- primary-action confusion matrix;
-- per-class positive agreement;
-- onset-window disagreement;
-- agreement by corpus and duration stratum;
-- intra-annotator consistency and unratable rate.
+- nominal Krippendorff's alpha for primary action, treating `UNRATABLE` as
+  missing rather than as a nominal action;
+- primary-action confusion matrix and per-class positive agreement;
+- earliest- and latest-onset endpoint disagreement;
+- 5% repeat consistency and unratable rate;
+- agreement by corpus and checkpoint-elapsed-time duration stratum;
+- 95% lineage-bootstrap intervals using seed `20261009` and 10,000 replicates.
 
-Continue with five actions only if primary-action alpha is at least 0.80. If it
-is lower, revise examples and collapse once to `WAIT / RESPOND / REPAIR`.
-Repeat the reliability check on a new pilot sample. If agreement remains below
-the threshold, stop semantic scaling rather than compensating with a larger
-model.
+Continue with the original action taxonomy only if nominal primary-action alpha
+is at least 0.80. If it is lower, revise examples and collapse exactly once:
+
+```text
+ACK     -> RESPOND
+WAIT    -> WAIT
+RESPOND -> RESPOND
+REPAIR  -> REPAIR
+UNRATABLE -> missing for nominal action alpha
+```
+
+A failed five-class pilot cannot be relabeled or reused to establish collapsed
+reliability. Run the collapsed reliability check on a new pilot sample. If it
+remains below the threshold, stop semantic scaling rather than compensating
+with a larger model.
 
 Preserve every raw judgment. Produce adjudicated labels only after raw
 agreement is reported. When all three primary labels differ, require expert
 adjudication; otherwise retain the majority label. Preserve the empirical label
-distribution for later soft-target experiments.
+distribution for later soft-target experiments. The R1 gate closes only when a
+real pilot agreement receipt records the locked sample, raw metrics, bootstrap
+settings, taxonomy decision, and pass result.
 
 ## 14. Main collection and power
 
@@ -361,9 +398,11 @@ Data is ready for frozen-probe work only when:
 - [ ] all primary labels were collected prefix-only;
 - [ ] three independent labels exist per pilot/evaluation item;
 - [ ] raw agreement was computed before adjudication;
-- [ ] the five-class or collapsed taxonomy passed the locked agreement gate;
+- [ ] the original or newly piloted collapsed taxonomy passed the locked agreement gate;
+- [ ] a real pilot agreement receipt closes R1;
 - [ ] lineage-disjoint splits are verified;
 - [ ] test labels are sealed;
+- [ ] an analysis-lock receipt exists before any test evaluation;
 - [ ] outcomes are stored separately from causal features;
 - [ ] technical/unratable exclusions are documented;
 - [ ] corpus and duration-stratum counts are reported.
