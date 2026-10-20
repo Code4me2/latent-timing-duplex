@@ -1,0 +1,7 @@
+media-intake-local
+Copyright 2026 Vel Moon Reichman
+
+This package is an original shell-free orchestration wrapper. It invokes, but
+does not bundle or relicense, the independent upstream projects yt-dlp and
+FFmpeg/ffprobe. Their names identify external command-line interoperability;
+consult their upstream projects for their licenses and notices.

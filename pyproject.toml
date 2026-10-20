@@ -45,7 +45,15 @@ packages = ["src/latent_timing_duplex"]
 [tool.hatch.build.targets.wheel.sources]
 "src/latent_timing_duplex" = "latent_timing_duplex"
 
+# Bundle the dependency-light compatibility library so parent wheels remain
+# installable by standard PEP 517 installers; it is also built independently.
+[tool.hatch.build.targets.wheel.force-include]
+"packages/media-intake/src/media_intake" = "media_intake"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "packages/media-intake/src"]
 addopts = "-q"
+
+[tool.uv.workspace]
+members = ["packages/media-intake"]

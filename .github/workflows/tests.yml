@@ -15,6 +15,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Frozen workspace install and tests
+        run: |
+          uv sync --locked --extra dev
+          uv run python -m pytest
+          uv run python -m pytest packages/media-intake/tests
+      - name: Frozen standalone install and tests outside workspace
+        run: |
+          cp -R packages/media-intake "$RUNNER_TEMP/media-intake"
+          cd "$RUNNER_TEMP/media-intake"
+          uv sync --locked --extra dev
+          uv run python -m pytest
+          uv build --wheel --out-dir "$RUNNER_TEMP/standalone-dist"
+      - name: Install standalone wheel in an isolated environment
+        run: |
+          python -m venv "$RUNNER_TEMP/standalone-venv"
+          "$RUNNER_TEMP/standalone-venv/bin/python" -m pip install "$RUNNER_TEMP"/standalone-dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/standalone-venv/bin/python" -c "import media_intake"
+          "$RUNNER_TEMP/standalone-venv/bin/media-intake" --help
+      - name: Build and install self-contained parent wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/parent-dist" .
+          python -m venv "$RUNNER_TEMP/parent-venv"
+          "$RUNNER_TEMP/parent-venv/bin/python" -m pip install "$RUNNER_TEMP"/parent-dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/parent-venv/bin/python" -c "import latent_timing_duplex, media_intake"
+          "$RUNNER_TEMP/parent-venv/bin/latent-timing-duplex" --help

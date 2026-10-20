@@ -1,0 +1,28 @@
+{
+  "schema": "podcast-sources/v1",
+  "purpose": "engineering-demo-not-confirmatory-pilot",
+  "permission_note": "User confirmed permissions for the requested acquisition in chat. No broader redistribution scope is asserted.",
+  "sources": [
+    {
+      "source_id": "youtube-kWPvdAZGd3A",
+      "url": "https://www.youtube.com/watch?v=kWPvdAZGd3A",
+      "expected_language": "en-US",
+      "rights_status": "user_confirmed",
+      "speaker_channels_status": "unaudited"
+    },
+    {
+      "source_id": "youtube-BHiYomkfoGQ",
+      "url": "https://www.youtube.com/watch?v=BHiYomkfoGQ",
+      "expected_language": "en-US",
+      "rights_status": "user_confirmed",
+      "speaker_channels_status": "unaudited"
+    },
+    {
+      "source_id": "youtube-DprKDXRlubw",
+      "url": "https://www.youtube.com/watch?v=DprKDXRlubw",
+      "expected_language": "en-US",
+      "rights_status": "user_confirmed",
+      "speaker_channels_status": "unaudited"
+    }
+  ]
+}

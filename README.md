@@ -13,7 +13,7 @@ Full-duplex spoken dialogue models (Moshi, SyncLLM, BayLing-Duplex) bury *speak*
 
 **Current index:** [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) (evidence through 2026-09-25). The forward plan is [docs/RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md): a causal silence-state/hazard sidecar followed, only after offline gates, by characterized valid Mimi silence-code generation plus text padding. The R1 data contract is [docs/SILENCE_GRAFT.md](docs/SILENCE_GRAFT.md), with the collection manual in [docs/DATA_LABELING_PROTOCOL.md](docs/DATA_LABELING_PROTOCOL.md). **R1 is scaffolded and its gate remains open until a real pilot agreement receipt passes; test evaluation also requires an analysis-lock receipt.** Phase 0 is frozen; Phase 1's scorer remains the supported package surface. Later C0/C1/C2 latent-graft runs are preserved as **exploratory receipts**, not a supported Phase 2 API or an efficacy result: [docs/PHASE2_EXPLORATORY.md](docs/PHASE2_EXPLORATORY.md).
 
-This repository does not download weights or corpora and does not re-run Spark jobs. Phase 0 numbers live in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) — do not invent them. A 10-clip DuplexChat EN slice is also recorded as reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
+This repository does not download weights or reconstruct research corpora and does not re-run Spark jobs. A separate, permission-confirmed podcast acquisition CLI can download local engineering-demo media (see below). Phase 0 numbers live in [docs/PHASE0_INTERIM_FINDINGS.md](docs/PHASE0_INTERIM_FINDINGS.md) — do not invent them. A 10-clip DuplexChat EN slice is also recorded as reference constants (`ltd reference`, [docs/SPARK.md](docs/SPARK.md)).
 
 Whether the *implicit* next-token signal is already predictive of turn events is a reportable Phase 0 result, including a negative one.
 
@@ -48,6 +48,27 @@ Not implemented (intentionally):
 - Live Moshi hidden-state extract (reserved for `spark-61dd` caches)
 - Supported Phase 2 policy conditioning or backbone fine-tuning (historical exploratory scripts are receipts only)
 
+## Podcast intake demo
+
+The metadata-only audit, repeatable MP4/caption downloader, and next labeling
+steps are documented in [docs/PODCAST_INTAKE.md](docs/PODCAST_INTAKE.md). The
+reusable implementation is the independently buildable
+[`packages/media-intake`](packages/media-intake/README.md) package; the old
+project modules are thin policy/compatibility wrappers. The three episodes in
+`configs/podcast_sources.json` have user-confirmed acquisition permissions but
+remain engineering-demo inputs, not approved pilot data.
+
+```bash
+.venv/bin/python -m latent_timing_duplex.data.podcast_download \
+  --sources configs/podcast_sources.json \
+  --output-dir "$HOME/Videos/latent-timing-duplex"
+```
+
+Requires `yt-dlp`, `ffmpeg`, and `ffprobe`. Downloads original-audio MP4s,
+available timestamped captions, and publisher/date metadata outside Git;
+records checksums and per-source failure statuses. Reuses verified media on
+reruns while independently retrying caption acquisition.
+
 ## Model and data ids (honest, not installed)
 
 These are the public artifacts the stubs point at. **Do not treat any of them as present on disk after `pip install`.**
@@ -74,13 +95,20 @@ Frozen-model inference is *planned* on two NVIDIA DGX Spark systems (128 GB unif
 
 ## Install the skeleton
 
-Python 3.10+ (3.12 is fine). From the repo root:
+Python 3.10+ (3.12 is fine). The supported workspace setup uses the committed,
+generated `uv.lock`. The reusable intake project remains a sibling workspace
+member for standalone development:
 
 ```bash
-python3 -m venv .venv
+uv sync --locked --extra dev
 source .venv/bin/activate
-pip install -e ".[dev]"
 ```
+
+A normal `pip install .` or parent wheel installation is self-contained: the
+parent wheel bundles the dependency-light `media_intake` import package rather
+than declaring an unavailable index dependency. The standalone distribution has
+its own lock and install instructions in
+[`packages/media-intake/README.md`](packages/media-intake/README.md).
 
 Sanity checks (`ltd` is also available as `python -m latent_timing_duplex`):
 

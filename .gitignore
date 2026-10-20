@@ -21,6 +21,16 @@ hf_cache/
 *.flac
 *.ogg
 *.m4a
+*.mp4
+*.webm
+*.mkv
+*.mov
+*.vtt
+*.srt
+*.ass
+*.ttml
+*.json3
+*.info.json
 *.tar
 *.tar.gz
 *.webdataset
