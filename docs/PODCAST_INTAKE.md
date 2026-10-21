@@ -16,6 +16,11 @@ is not evidence of speaker separation. The initial caption acquisition found
 original-English **automatic captions** for all three, but no publisher-provided
 caption tracks. These are machine-generated transcripts, not gold labels.
 
+Acquisition is maintained separately in
+[Code4me2/media-intake](https://github.com/Code4me2/media-intake). This application
+uses a pinned vendored snapshot; see [upstream/update policy](MEDIA_INTAKE_UPSTREAM.md).
+Existing archives and command entry points are unchanged.
+
 ## Requirements and metadata-only inspection
 
 Install the workspace with `uv sync --locked --extra dev` and provide `yt-dlp`,

@@ -18,6 +18,18 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Verify vendored acquisition pin without upstream credentials
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          pin = json.loads(Path("packages/media-intake.upstream.json").read_text())
+          tree = subprocess.check_output(
+              ["git", "rev-parse", "HEAD:packages/media-intake"], text=True
+          ).strip()
+          assert tree == pin["git_tree"], "Vendored acquisition changed without updating its pin"
+          PY
       - name: Frozen workspace install and tests
         run: |
           uv sync --locked --extra dev

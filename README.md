@@ -52,9 +52,12 @@ Not implemented (intentionally):
 
 The metadata-only audit, repeatable MP4/caption downloader, and next labeling
 steps are documented in [docs/PODCAST_INTAKE.md](docs/PODCAST_INTAKE.md). The
-reusable implementation is the independently buildable
-[`packages/media-intake`](packages/media-intake/README.md) package; the old
-project modules are thin policy/compatibility wrappers. The three episodes in
+acquisition source of truth is now the standalone
+[Code4me2/media-intake](https://github.com/Code4me2/media-intake) repository
+(initially private). [`packages/media-intake`](packages/media-intake/README.md)
+is a commit-pinned vendored snapshot, so public installs require no upstream
+credentials. See [upstream/update policy](docs/MEDIA_INTAKE_UPSTREAM.md).
+The project modules remain thin policy/compatibility wrappers. The three episodes in
 `configs/podcast_sources.json` have user-confirmed acquisition permissions but
 remain engineering-demo inputs, not approved pilot data.
 
@@ -96,8 +99,8 @@ Frozen-model inference is *planned* on two NVIDIA DGX Spark systems (128 GB unif
 ## Install the skeleton
 
 Python 3.10+ (3.12 is fine). The supported workspace setup uses the committed,
-generated `uv.lock`. The reusable intake project remains a sibling workspace
-member for standalone development:
+generated `uv.lock`. The pinned acquisition snapshot remains a workspace member
+for integration tests; acquisition development lives in its standalone repository:
 
 ```bash
 uv sync --locked --extra dev

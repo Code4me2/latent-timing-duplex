@@ -1,0 +1,10 @@
+{
+  "schema": "vendored-package-pin/v1",
+  "repository": "https://github.com/Code4me2/media-intake",
+  "revision": "4c29aad0386ac5cf400672e4488b78dfd8fa3e06",
+  "git_tree": "36e3ab439805ecc225050639dcce76ea39b04226",
+  "path": "packages/media-intake",
+  "distribution": "media-intake-local",
+  "import": "media_intake",
+  "note": "Exact extracted package snapshot. Standalone repository setup follows this commit; acquisition implementation is unchanged. No upstream credentials are needed to build this vendored copy."
+}
